@@ -1,6 +1,8 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+
+import { SectionCard } from "@/components/cards";
 import { useMemo, useState, useTransition } from "react";
 
 type SiteFormProps = {
@@ -169,133 +171,255 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
     });
   }
 
+  const messageClassName =
+    messageTone === "error"
+      ? "text-rose-200"
+      : messageTone === "warn"
+        ? "text-amber-200"
+        : "text-emerald-200";
+
   return (
     <form onSubmit={onSubmit} className="space-y-6">
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">Site Name</span>
-          <input className="input" name="name" value={values.name} onChange={(e) => updateField("name", e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">Site Slug</span>
-          <input className="input" name="slug" value={values.slug} onChange={(e) => updateField("slug", e.target.value)} />
-        </label>
-        <label className="block md:col-span-2 xl:col-span-1">
-          <span className="mb-2 block text-sm text-slate-300">Site Directory</span>
-          <input className="input" name="siteDirectory" value={values.siteDirectory} onChange={(e) => updateField("siteDirectory", e.target.value)} />
-        </label>
-        <label className="block md:col-span-2">
-          <span className="mb-2 block text-sm text-slate-300">Backup Destination</span>
-          <input className="input" name="backupDestination" value={values.backupDestination} onChange={(e) => updateField("backupDestination", e.target.value)} />
-        </label>
-        <div className="flex items-end">
-          <button type="button" onClick={onDetect} className="btn btn-secondary w-full" disabled={detecting}>
-            {detecting ? "Detecting..." : "Auto-Detect docker-compose"}
-          </button>
+      <SectionCard
+        title="Site Identity"
+        description="Basic label and identifier for this WordPress stack."
+      >
+        <div className="grid gap-5 lg:grid-cols-2">
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Site Name</span>
+            <input
+              className="input"
+              name="name"
+              value={values.name}
+              onChange={(e) => updateField("name", e.target.value)}
+              placeholder="My WordPress Site"
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Site Slug</span>
+            <input
+              className="input"
+              name="slug"
+              value={values.slug}
+              onChange={(e) => updateField("slug", e.target.value)}
+              placeholder="my-wordpress-site"
+            />
+          </label>
+          <label className="block lg:col-span-2">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Notes</span>
+            <textarea
+              className="textarea min-h-32"
+              name="notes"
+              value={values.notes}
+              onChange={(e) => updateField("notes", e.target.value)}
+              placeholder="Optional notes for this stack, host, or restore quirks."
+            />
+          </label>
         </div>
-      </div>
+      </SectionCard>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">DB Container</span>
-          <input className="input" name="dbContainerName" value={values.dbContainerName} onChange={(e) => updateField("dbContainerName", e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">DB Name</span>
-          <input className="input" name="dbName" value={values.dbName} onChange={(e) => updateField("dbName", e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">DB User</span>
-          <input className="input" name="dbUser" value={values.dbUser} onChange={(e) => updateField("dbUser", e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">DB Password</span>
-          <input className="input" name="dbPassword" value={values.dbPassword} onChange={(e) => updateField("dbPassword", e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">WordPress Container</span>
-          <input className="input" name="wordpressContainerName" value={values.wordpressContainerName} onChange={(e) => updateField("wordpressContainerName", e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">Uploads Path</span>
-          <input className="input" name="uploadsPath" value={values.uploadsPath} onChange={(e) => updateField("uploadsPath", e.target.value)} />
-        </label>
-      </div>
+      <SectionCard
+        title="Paths & Storage"
+        description="Use container-visible paths such as /mnt/wp-sites and /mnt/wp-backups."
+      >
+        <div className="grid gap-5 xl:grid-cols-[1fr_1fr_auto]">
+          <label className="block xl:col-span-2">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Site Directory</span>
+            <input
+              className="input font-mono text-sm"
+              name="siteDirectory"
+              value={values.siteDirectory}
+              onChange={(e) => updateField("siteDirectory", e.target.value)}
+              placeholder="/mnt/wp-sites/example-site"
+              spellCheck={false}
+            />
+          </label>
+          <div className="flex items-end xl:col-span-1">
+            <button type="button" onClick={onDetect} className="btn btn-secondary w-full" disabled={detecting}>
+              {detecting ? "Detecting..." : "Auto-Detect docker-compose"}
+            </button>
+          </div>
+          <label className="block xl:col-span-3">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Backup Destination</span>
+            <input
+              className="input font-mono text-sm"
+              name="backupDestination"
+              value={values.backupDestination}
+              onChange={(e) => updateField("backupDestination", e.target.value)}
+              placeholder="/mnt/wp-backups/example-site"
+              spellCheck={false}
+            />
+          </label>
+          <label className="block xl:col-span-3">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Uploads Path</span>
+            <input
+              className="input font-mono text-sm"
+              name="uploadsPath"
+              value={values.uploadsPath}
+              onChange={(e) => updateField("uploadsPath", e.target.value)}
+              placeholder="/mnt/wp-sites/example-site/html/wp-content/uploads"
+              spellCheck={false}
+            />
+          </label>
+        </div>
+      </SectionCard>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">Backup Frequency</span>
-          <select className="select" name="backupFrequency" value={values.backupFrequency} onChange={(e) => updateField("backupFrequency", e.target.value)}>
-            <option value="manual">Manual</option>
-            <option value="hourly">Hourly</option>
-            <option value="daily">Daily</option>
-            <option value="weekly">Weekly</option>
-            <option value="cron">Cron Expression</option>
-          </select>
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">Backup Time</span>
-          <input className="input" type="time" name="backupTime" value={values.backupTime} onChange={(e) => updateField("backupTime", e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">Timezone</span>
-          <input className="input" name="timezone" value={values.timezone} onChange={(e) => updateField("timezone", e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">Cron Expression</span>
-          <input className="input" name="cronExpression" value={values.cronExpression} onChange={(e) => updateField("cronExpression", e.target.value)} placeholder="0 2 * * *" />
-        </label>
-      </div>
+      <SectionCard
+        title="Docker & Database"
+        description="Container and database credentials used for backup and restore commands."
+      >
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-5">
+          <label className="block xl:col-span-2">
+            <span className="mb-2 block text-sm font-medium text-slate-200">DB Container</span>
+            <input
+              className="input font-mono text-sm"
+              name="dbContainerName"
+              value={values.dbContainerName}
+              onChange={(e) => updateField("dbContainerName", e.target.value)}
+              spellCheck={false}
+            />
+          </label>
+          <label className="block xl:col-span-2">
+            <span className="mb-2 block text-sm font-medium text-slate-200">WordPress Container</span>
+            <input
+              className="input font-mono text-sm"
+              name="wordpressContainerName"
+              value={values.wordpressContainerName}
+              onChange={(e) => updateField("wordpressContainerName", e.target.value)}
+              spellCheck={false}
+            />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">DB Name</span>
+            <input className="input" name="dbName" value={values.dbName} onChange={(e) => updateField("dbName", e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">DB User</span>
+            <input className="input" name="dbUser" value={values.dbUser} onChange={(e) => updateField("dbUser", e.target.value)} />
+          </label>
+          <label className="block md:col-span-2 xl:col-span-2">
+            <span className="mb-2 block text-sm font-medium text-slate-200">DB Password</span>
+            <input className="input" name="dbPassword" value={values.dbPassword} onChange={(e) => updateField("dbPassword", e.target.value)} />
+          </label>
+        </div>
+      </SectionCard>
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">Retention Count</span>
-          <input className="input" type="number" min="1" max="100" name="retentionCount" value={values.retentionCount} onChange={(e) => updateField("retentionCount", e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">Delete Older Than Days</span>
-          <input className="input" type="number" min="1" name="retentionDays" value={values.retentionDays} onChange={(e) => updateField("retentionDays", e.target.value)} />
-        </label>
-        <label className="block">
-          <span className="mb-2 block text-sm text-slate-300">Backup Mode</span>
-          <select className="select" name="backupMode" value={values.backupMode} onChange={(e) => updateField("backupMode", e.target.value)}>
-            <option value="full">Full Backup</option>
-            <option value="database">Database Only</option>
-            <option value="files">Files Only</option>
-          </select>
-        </label>
-        <label className="block md:col-span-2 xl:col-span-1">
-          <span className="mb-2 block text-sm text-slate-300">Notes</span>
-          <textarea className="textarea min-h-28" name="notes" value={values.notes} onChange={(e) => updateField("notes", e.target.value)} />
-        </label>
-      </div>
+      <SectionCard
+        title="Backup Schedule"
+        description="Choose when StackPress should run automatic backups."
+      >
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Backup Frequency</span>
+            <select className="select" name="backupFrequency" value={values.backupFrequency} onChange={(e) => updateField("backupFrequency", e.target.value)}>
+              <option value="manual">Manual</option>
+              <option value="hourly">Hourly</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="cron">Cron Expression</option>
+            </select>
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Backup Time</span>
+            <input className="input" type="time" name="backupTime" value={values.backupTime} onChange={(e) => updateField("backupTime", e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Timezone</span>
+            <input className="input" name="timezone" value={values.timezone} onChange={(e) => updateField("timezone", e.target.value)} spellCheck={false} />
+          </label>
+          <label className="block xl:col-span-4">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Cron Expression</span>
+            <input className="input font-mono text-sm" name="cronExpression" value={values.cronExpression} onChange={(e) => updateField("cronExpression", e.target.value)} placeholder="0 2 * * *" spellCheck={false} />
+          </label>
+        </div>
 
-      <div className="grid gap-3 rounded-3xl border border-white/10 bg-white/5 p-4 md:grid-cols-3">
-        <label className="flex items-center gap-3 text-sm text-slate-300">
-          <input type="checkbox" name="active" checked={active} onChange={(e) => setActive(e.target.checked)} />
-          Site active
-        </label>
-        <label className="flex items-center gap-3 text-sm text-slate-300">
-          <input type="checkbox" name="scheduleEnabled" checked={scheduleEnabled} onChange={(e) => setScheduleEnabled(e.target.checked)} />
-          Enable schedule
-        </label>
-        <label className="flex items-center gap-3 text-sm text-slate-300">
-          <input type="checkbox" name="neverDeleteNewest" checked={neverDeleteNewest} onChange={(e) => setNeverDeleteNewest(e.target.checked)} />
-          Never delete newest
-        </label>
-      </div>
+        <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+          <label className="flex items-start gap-3 text-sm text-slate-200">
+            <input type="checkbox" name="scheduleEnabled" checked={scheduleEnabled} onChange={(e) => setScheduleEnabled(e.target.checked)} />
+            <span>
+              Enable Schedule
+              <span className="mt-1 block text-xs text-slate-400">
+                StackPress will only schedule this site when the site is active and the backup frequency is not Manual.
+              </span>
+            </span>
+          </label>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Retention & Cleanup"
+        description="Controls how many backup points StackPress keeps."
+      >
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Retention Count</span>
+            <input className="input" type="number" min="1" max="100" name="retentionCount" value={values.retentionCount} onChange={(e) => updateField("retentionCount", e.target.value)} />
+          </label>
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Delete Older Than Days</span>
+            <input className="input" type="number" min="1" name="retentionDays" value={values.retentionDays} onChange={(e) => updateField("retentionDays", e.target.value)} />
+          </label>
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 xl:self-end">
+            <label className="flex items-start gap-3 text-sm text-slate-200">
+              <input type="checkbox" name="neverDeleteNewest" checked={neverDeleteNewest} onChange={(e) => setNeverDeleteNewest(e.target.checked)} />
+              <span>
+                Never Delete Newest
+                <span className="mt-1 block text-xs text-slate-400">
+                  Keeps the most recent successful backup even when other retention rules would remove it.
+                </span>
+              </span>
+            </label>
+          </div>
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Backup Mode"
+        description="Choose what gets backed up and whether this site is active."
+      >
+        <div className="grid gap-5 md:grid-cols-2">
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Backup Mode</span>
+            <select className="select" name="backupMode" value={values.backupMode} onChange={(e) => updateField("backupMode", e.target.value)}>
+              <option value="full">Full Backup</option>
+              <option value="database">Database Only</option>
+              <option value="files">Files Only</option>
+            </select>
+          </label>
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 md:self-end">
+            <label className="flex items-start gap-3 text-sm text-slate-200">
+              <input type="checkbox" name="active" checked={active} onChange={(e) => setActive(e.target.checked)} />
+              <span>
+                Site Active
+                <span className="mt-1 block text-xs text-slate-400">
+                  Inactive sites stay in StackPress but are skipped by bulk and scheduled backup flows.
+                </span>
+              </span>
+            </label>
+          </div>
+        </div>
+      </SectionCard>
 
       {message ? (
-        <p className={`text-sm ${messageTone === "error" ? "text-rose-200" : messageTone === "warn" ? "text-amber-200" : "text-emerald-200"}`}>{message}</p>
+        <div className={`rounded-2xl border px-4 py-3 text-sm ${messageTone === "error" ? "border-rose-400/25 bg-rose-400/10" : messageTone === "warn" ? "border-amber-400/25 bg-amber-400/10" : "border-emerald-400/20 bg-emerald-400/10"}`}>
+          <p className={messageClassName}>{message}</p>
+        </div>
       ) : null}
 
-      <div className="flex flex-wrap gap-3">
-        <button type="submit" className="btn btn-primary" disabled={pending}>
-          {pending ? "Saving..." : "Save Site"}
-        </button>
-        <button type="button" className="btn btn-secondary" onClick={() => router.push("/sites")}>
-          Cancel
-        </button>
+      <div className="sticky bottom-4 z-10 rounded-3xl border border-white/10 bg-slate-950/88 p-4 shadow-[0_20px_50px_rgba(1,9,20,0.45)] backdrop-blur">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-slate-400">
+            Review the detected paths and container names before saving. You can adjust any field manually.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <button type="submit" className="btn btn-primary min-w-36" disabled={pending}>
+              {pending ? "Saving..." : "Save Site"}
+            </button>
+            <button type="button" className="btn btn-secondary min-w-28" onClick={() => router.push("/sites")}>
+              Cancel
+            </button>
+          </div>
+        </div>
       </div>
     </form>
   );
