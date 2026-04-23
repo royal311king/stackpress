@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Site {
+  id                     String       @id @default(cuid())
+  name                   String
+  slug                   String       @unique
+  siteDirectory          String
+  backupDestination      String
+  dbContainerName        String
+  dbName                 String
+  dbUser                 String
+  dbPassword             String
+  wordpressContainerName String
+  uploadsPath            String
+  active                 Boolean      @default(true)
+  notes                  String?
+  backupFrequency        String       @default("manual")
+  backupTime             String?
+  timezone               String       @default("America/Chicago")
+  cronExpression         String?
+  retentionCount         Int          @default(10)
+  retentionDays          Int?
+  neverDeleteNewest      Boolean      @default(true)
+  backupMode             String       @default("full")
+  scheduleEnabled        Boolean      @default(false)
+  lastBackupAt           DateTime?
+  lastBackupStatus       String?
+  lastBackupMessage      String?
+  createdAt              DateTime     @default(now())
+  updatedAt              DateTime     @updatedAt
+  backups                BackupJob[]
+
+  @@index([active, scheduleEnabled])
+}
+
+model BackupJob {
+  id               String   @id @default(cuid())
+  siteId           String
+  site             Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  triggerSource    String   @default("manual")
+  status           String   @default("queued")
+  backupType       String
+  startedAt        DateTime?
+  completedAt      DateTime?
+  durationSeconds  Int?
+  totalBytes       BigInt?
+  dbDumpPath       String?
+  filesArchivePath String?
+  manifestPath     String?
+  progressStep     String?
+  errorMessage     String?
+  logExcerpt       String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([siteId, createdAt])
+  @@index([status, createdAt])
+}
+
+model AppSetting {
+  id                 String   @id @default("singleton")
+  appName            String   @default("StackPress")
+  appSubtitle        String   @default("Self-Hosted WordPress Stack Manager")
+  defaultTimezone    String   @default("America/Chicago")
+  defaultBackupRoot  String?  @default("./storage")
+  defaultLogRoot     String?  @default("./logs")
+  schedulerEnabled   Boolean  @default(true)
+  diskFreeThresholdGb Int     @default(2)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  level     String   @default("info")
+  scope     String
+  message   String
+  metaJson  String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}

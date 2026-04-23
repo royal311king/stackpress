@@ -1,0 +1,19 @@
+services:
+  stackpress:
+    build: .
+    container_name: stackpress
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: "file:../data/stackpress.db"
+      STACKPRESS_APP_URL: "http://localhost:3000"
+      STACKPRESS_STORAGE_ROOT: "./storage"
+      STACKPRESS_LOG_ROOT: "./logs"
+      STACKPRESS_DATA_ROOT: "./data"
+      STACKPRESS_TIMEZONE: "America/Chicago"
+    volumes:
+      - ./data:/app/data
+      - ./storage:/app/storage
+      - ./logs:/app/logs
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
