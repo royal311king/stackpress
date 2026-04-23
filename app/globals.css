@@ -75,6 +75,16 @@ textarea {
   color: #fde68a;
 }
 
+.badge-caution {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fcd34d;
+}
+
+.badge-info {
+  background: rgba(56, 189, 248, 0.16);
+  color: #bae6fd;
+}
+
 .badge-danger {
   background: rgba(248, 113, 113, 0.14);
   color: #fca5a5;

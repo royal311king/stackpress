@@ -2,16 +2,175 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 
+type ComposeService = {
+  container_name?: string;
+  image?: string;
+  environment?: Record<string, unknown> | string[];
+  env_file?: string | string[];
+  volumes?: Array<string | { source?: string; target?: string }>;
+};
+
+type ComposeFile = {
+  services?: Record<string, ComposeService>;
+};
+
+type ServiceCandidate = {
+  name: string;
+  config: ComposeService;
+  environment: Record<string, string>;
+};
+
 export type DetectionResult = {
   siteName: string;
   slug: string;
+  siteDirectory: string;
   wordpressContainerName: string;
   dbContainerName: string;
   dbName: string;
   dbUser: string;
   dbPassword: string;
   uploadsPath: string;
+  warnings: string[];
+  detectedFields: string[];
 };
+
+function slugify(value: string) {
+  return (
+    value
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "wordpress-site"
+  );
+}
+
+function titleizeSlug(slug: string) {
+  return slug
+    .split("-")
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function readEnvFile(envPath: string) {
+  if (!fs.existsSync(envPath)) {
+    return {} as Record<string, string>;
+  }
+
+  const values: Record<string, string> = {};
+  for (const line of fs.readFileSync(envPath, "utf8").split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) {
+      continue;
+    }
+
+    const [rawKey, ...rawValue] = trimmed.split("=");
+    const key = rawKey.trim();
+    const value = rawValue.join("=").trim().replace(/^['"]|['"]$/g, "");
+    if (key) {
+      values[key] = value;
+    }
+  }
+
+  return values;
+}
+
+function interpolateEnv(value: string, env: Record<string, string>) {
+  return value.replace(/\$\{([^}:]+)(?:(:-|-)([^}]*))?\}/g, (_match, key: string, _mode: string | undefined, fallback: string | undefined) => {
+    return env[key] ?? fallback ?? "";
+  });
+}
+
+function normalizeEnvironment(service: ComposeService, siteDirectory: string, baseEnv: Record<string, string>) {
+  const envFiles = Array.isArray(service.env_file) ? service.env_file : service.env_file ? [service.env_file] : [];
+  const mergedEnv = { ...baseEnv };
+
+  for (const envFile of envFiles) {
+    const envPath = path.isAbsolute(envFile) ? envFile : path.join(siteDirectory, envFile);
+    Object.assign(mergedEnv, readEnvFile(envPath));
+  }
+
+  const environment: Record<string, string> = {};
+
+  if (Array.isArray(service.environment)) {
+    for (const entry of service.environment) {
+      if (!entry) {
+        continue;
+      }
+
+      if (!entry.includes("=")) {
+        if (mergedEnv[entry]) {
+          environment[entry] = mergedEnv[entry];
+        }
+        continue;
+      }
+
+      const [key, ...rawValue] = entry.split("=");
+      environment[key] = interpolateEnv(rawValue.join("="), mergedEnv);
+    }
+  } else if (service.environment && typeof service.environment === "object") {
+    for (const [key, rawValue] of Object.entries(service.environment)) {
+      if (rawValue === undefined || rawValue === null) {
+        if (mergedEnv[key]) {
+          environment[key] = mergedEnv[key];
+        }
+        continue;
+      }
+
+      environment[key] = interpolateEnv(String(rawValue), mergedEnv);
+    }
+  }
+
+  return environment;
+}
+
+function getVolumeTargets(service: ComposeService) {
+  return (service.volumes ?? []).map((volume) => {
+    if (typeof volume === "string") {
+      const parts = volume.split(":");
+      return parts[1] ?? parts[0] ?? "";
+    }
+
+    return volume.target ?? "";
+  });
+}
+
+function scoreWordPressService(candidate: ServiceCandidate) {
+  let score = 0;
+  const containerName = candidate.config.container_name?.toLowerCase() ?? "";
+  const image = candidate.config.image?.toLowerCase() ?? "";
+  const serviceName = candidate.name.toLowerCase();
+  const volumeTargets = getVolumeTargets(candidate.config).join(" ").toLowerCase();
+
+  if (containerName.includes("wp-")) score += 5;
+  if (serviceName === "wordpress" || serviceName.includes("wp")) score += 3;
+  if (image.includes("wordpress")) score += 5;
+  if (candidate.environment.WORDPRESS_DB_HOST || candidate.environment.WORDPRESS_DB_NAME) score += 4;
+  if (volumeTargets.includes("/var/www/html") || volumeTargets.includes("html")) score += 2;
+
+  return score;
+}
+
+function scoreDbService(candidate: ServiceCandidate) {
+  let score = 0;
+  const containerName = candidate.config.container_name?.toLowerCase() ?? "";
+  const image = candidate.config.image?.toLowerCase() ?? "";
+  const serviceName = candidate.name.toLowerCase();
+  const volumeTargets = getVolumeTargets(candidate.config).join(" ").toLowerCase();
+
+  if (containerName.includes("wpdb-") || containerName.includes("db")) score += 5;
+  if (serviceName.includes("db") || serviceName.includes("mysql") || serviceName.includes("mariadb")) score += 3;
+  if (image.includes("mysql") || image.includes("mariadb")) score += 5;
+  if (candidate.environment.MYSQL_DATABASE || candidate.environment.MARIADB_DATABASE) score += 4;
+  if (volumeTargets.includes("/var/lib/mysql") || volumeTargets.includes("db")) score += 2;
+
+  return score;
+}
+
+function detectUploadsPath(siteDirectory: string) {
+  const standardUploads = path.join(siteDirectory, "html", "wp-content", "uploads");
+  return standardUploads;
+}
 
 export async function detectSiteFromCompose(siteDirectory: string): Promise<DetectionResult | null> {
   const composePath = path.join(siteDirectory, "docker-compose.yml");
@@ -20,28 +179,87 @@ export async function detectSiteFromCompose(siteDirectory: string): Promise<Dete
   }
 
   const raw = fs.readFileSync(composePath, "utf8");
-  const parsed = yaml.load(raw) as {
-    services?: Record<string, { container_name?: string; environment?: Record<string, string> }>;
+  const parsed = yaml.load(raw) as ComposeFile | null;
+  const services = parsed?.services ?? {};
+  const baseEnv = {
+    ...readEnvFile(path.join(siteDirectory, ".env")),
+    SITE_SLUG: path.basename(siteDirectory)
   };
 
-  const services = parsed?.services ?? {};
-  const wordpressEntry =
-    Object.values(services).find((service) => service.container_name?.includes("wp-")) ??
-    Object.values(services)[0];
-  const dbEntry =
-    Object.values(services).find((service) => service.container_name?.includes("wpdb-")) ??
-    Object.values(services)[1];
+  const serviceCandidates = Object.entries(services).map(([name, config]) => ({
+    name,
+    config,
+    environment: normalizeEnvironment(config, siteDirectory, baseEnv)
+  }));
 
-  const slug = path.basename(siteDirectory);
+  const wordpressEntry =
+    [...serviceCandidates].sort((a, b) => scoreWordPressService(b) - scoreWordPressService(a))[0] ?? null;
+  const dbEntry =
+    [...serviceCandidates].sort((a, b) => scoreDbService(b) - scoreDbService(a))[0] ?? null;
+
+  const slug = slugify(path.basename(siteDirectory));
+  const warnings: string[] = [];
+  const detectedFields = ["siteDirectory", "slug", "uploadsPath"];
+
+  const wordpressContainerName = wordpressEntry?.config.container_name ?? `wp-${slug}`;
+  if (wordpressEntry?.config.container_name) {
+    detectedFields.push("wordpressContainerName");
+  } else {
+    warnings.push(`WordPress container name was not found in docker-compose.yml, so StackPress used ${wordpressContainerName}.`);
+  }
+
+  const dbContainerName = dbEntry?.config.container_name ?? `wpdb-${slug}`;
+  if (dbEntry?.config.container_name) {
+    detectedFields.push("dbContainerName");
+  } else {
+    warnings.push(`Database container name was not found in docker-compose.yml, so StackPress used ${dbContainerName}.`);
+  }
+
+  const dbName = dbEntry?.environment.MYSQL_DATABASE ?? dbEntry?.environment.MARIADB_DATABASE ?? dbEntry?.environment.WORDPRESS_DB_NAME ?? "wpdb";
+  if (dbEntry?.environment.MYSQL_DATABASE || dbEntry?.environment.MARIADB_DATABASE || dbEntry?.environment.WORDPRESS_DB_NAME) {
+    detectedFields.push("dbName");
+  } else {
+    warnings.push(`Database name was not found in compose environment, so StackPress used ${dbName}.`);
+  }
+
+  const dbUser = dbEntry?.environment.MYSQL_USER ?? dbEntry?.environment.MARIADB_USER ?? wordpressEntry?.environment.WORDPRESS_DB_USER ?? "wpuser";
+  if (dbEntry?.environment.MYSQL_USER || dbEntry?.environment.MARIADB_USER || wordpressEntry?.environment.WORDPRESS_DB_USER) {
+    detectedFields.push("dbUser");
+  } else {
+    warnings.push(`Database user was not found in compose environment, so StackPress used ${dbUser}.`);
+  }
+
+  const dbPassword = dbEntry?.environment.MYSQL_PASSWORD ?? dbEntry?.environment.MARIADB_PASSWORD ?? wordpressEntry?.environment.WORDPRESS_DB_PASSWORD ?? "wppass123";
+  if (dbEntry?.environment.MYSQL_PASSWORD || dbEntry?.environment.MARIADB_PASSWORD || wordpressEntry?.environment.WORDPRESS_DB_PASSWORD) {
+    detectedFields.push("dbPassword");
+  } else {
+    warnings.push("Database password was not found in compose environment, so StackPress used the homelab default.");
+  }
+
+  if (!wordpressEntry) {
+    warnings.push("No clear WordPress service was identified in docker-compose.yml. Check the detected WordPress container name before saving.");
+  }
+
+  if (!dbEntry) {
+    warnings.push("No clear database service was identified in docker-compose.yml. Check the detected database container name and credentials before saving.");
+  }
+
+  const uploadsPath = detectUploadsPath(siteDirectory);
+  if (!fs.existsSync(path.join(siteDirectory, "html"))) {
+    warnings.push("The site directory does not currently contain an html folder, so file backup paths should be double-checked.");
+  }
 
   return {
-    siteName: slug.replace(/-/g, " "),
+    siteName: titleizeSlug(slug),
     slug,
-    wordpressContainerName: wordpressEntry?.container_name ?? `wp-${slug}`,
-    dbContainerName: dbEntry?.container_name ?? `wpdb-${slug}`,
-    dbName: dbEntry?.environment?.MYSQL_DATABASE ?? "wpdb",
-    dbUser: dbEntry?.environment?.MYSQL_USER ?? "wpuser",
-    dbPassword: dbEntry?.environment?.MYSQL_PASSWORD ?? "wppass123",
-    uploadsPath: path.join(siteDirectory, "html", "wp-content", "uploads")
+    siteDirectory,
+    wordpressContainerName,
+    dbContainerName,
+    dbName,
+    dbUser,
+    dbPassword,
+    uploadsPath,
+    warnings,
+    detectedFields
   };
 }

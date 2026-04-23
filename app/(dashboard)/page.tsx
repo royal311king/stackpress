@@ -2,6 +2,7 @@ import Link from "next/link";
 
 import { AutoRefresh } from "@/components/auto-refresh";
 import { PageHeader, SectionCard, StatCard } from "@/components/cards";
+import { ActionButton } from "@/components/forms";
 import { StatusBadge } from "@/components/status-badge";
 import { getDashboardData } from "@/lib/services/dashboard";
 import { formatBytes, formatRelative, formatTimestamp } from "@/lib/utils";
@@ -16,9 +17,12 @@ export default async function DashboardPage() {
         title="Dashboard"
         subtitle="Central backup visibility for all of your Docker-based WordPress sites across the homelab."
         actions={
-          <Link className="btn btn-primary" href="/sites">
-            Add Site
-          </Link>
+          <>
+            <ActionButton endpoint="/api/backups/run-all" label="Backup All Sites" variant="primary" />
+            <Link className="btn btn-secondary" href="/sites">
+              Add Site
+            </Link>
+          </>
         }
       />
 
@@ -33,30 +37,44 @@ export default async function DashboardPage() {
         />
       </div>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1.4fr_1fr]">
-        <SectionCard title="Sites" description="Status, last backup state, and current backup mode.">
-          <div className="space-y-3">
-            {data.sites.map((site) => (
-              <Link
-                key={site.id}
-                href={`/sites/${site.id}`}
-                className="flex flex-col gap-2 rounded-2xl border border-white/10 bg-white/5 p-4 transition hover:bg-white/[0.08]"
-              >
-                <div className="flex items-center justify-between gap-4">
-                  <div>
-                    <p className="text-lg font-medium">{site.name}</p>
-                    <p className="text-sm text-slate-400">{site.siteDirectory}</p>
-                  </div>
-                  <StatusBadge value={site.active ? "active" : "inactive"} />
+      <div className="mt-6 grid gap-6 xl:grid-cols-[1.1fr_0.9fr]">
+        <SectionCard title="Bulk Backup" description="Run active-site backups sequentially from one dashboard action.">
+          {data.latestBulkBackup ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <StatusBadge
+                  value={data.latestBulkBackup.state === "running" ? "running" : data.latestBulkBackup.level}
+                />
+                <span className="text-xs text-slate-500">{formatTimestamp(data.latestBulkBackup.createdAt)}</span>
+              </div>
+              <p className="text-sm text-slate-200">{data.latestBulkBackup.message}</p>
+              <div className="grid gap-3 sm:grid-cols-4">
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Total</p>
+                  <p className="mt-2 text-2xl font-semibold">{data.latestBulkBackup.totalSites}</p>
                 </div>
-                <div className="flex flex-wrap gap-3 text-sm text-slate-400">
-                  <span>Last backup: {formatRelative(site.lastBackupAt)}</span>
-                  <span>Mode: {site.backupMode}</span>
-                  <span>Schedule: {site.scheduleEnabled ? site.backupFrequency : "disabled"}</span>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Success</p>
+                  <p className="mt-2 text-2xl font-semibold">{data.latestBulkBackup.succeeded}</p>
                 </div>
-              </Link>
-            ))}
-          </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Warnings</p>
+                  <p className="mt-2 text-2xl font-semibold">{data.latestBulkBackup.warnings}</p>
+                </div>
+                <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <p className="text-xs uppercase tracking-[0.18em] text-slate-500">Failed</p>
+                  <p className="mt-2 text-2xl font-semibold">{data.latestBulkBackup.failed}</p>
+                </div>
+              </div>
+              <p className="text-sm text-slate-400">
+                {data.latestBulkBackup.state === "running"
+                  ? `Current site: ${data.latestBulkBackup.currentSiteName ?? "Starting..."}`
+                  : "Latest bulk run summary"}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">No bulk backup has been run yet.</p>
+          )}
         </SectionCard>
 
         <SectionCard title="Recent Activity" description="Latest log events recorded locally.">
@@ -76,6 +94,39 @@ export default async function DashboardPage() {
       </div>
 
       <div className="mt-6">
+        <SectionCard title="Sites" description="Status, last backup state, and current backup mode.">
+          <div className="space-y-3">
+            {data.sites.map((site) => (
+              <Link
+                key={site.id}
+                href={`/sites/${site.id}`}
+                className="flex flex-col gap-2 rounded-2xl border border-white/10 bg-white/5 p-4 transition hover:bg-white/[0.08]"
+              >
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <p className="text-lg font-medium">{site.name}</p>
+                    <p className="text-sm text-slate-400">{site.siteDirectory}</p>
+                  </div>
+                  <StatusBadge value={site.active ? "active" : "inactive"} />
+                </div>
+                <div className="flex flex-wrap gap-3 text-sm text-slate-400">
+                  <span>Last backup: {formatRelative(site.lastBackupAt)}</span>
+                  <span>Mode: {site.backupMode}</span>
+                  <span>Schedule: {site.scheduleLabel}</span>
+                  <span>Next run: {site.nextRunLabel}</span>
+                  <span>Last scheduled result: {site.lastScheduledBackup ? site.lastScheduledBackup.status : site.scheduleState === "disabled" ? "manual" : "queued"}</span>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <StatusBadge value={site.scheduleState} />
+                  <StatusBadge value={site.lastScheduledBackup?.status ?? (site.scheduleState === "disabled" ? "manual" : "queued")} />
+                </div>
+              </Link>
+            ))}
+          </div>
+        </SectionCard>
+      </div>
+
+      <div className="mt-6">
         <SectionCard title="Recent Backups" description="Most recent backup jobs across all sites.">
           <div className="table-wrap">
             <table>
@@ -83,6 +134,7 @@ export default async function DashboardPage() {
                 <tr>
                   <th>Site</th>
                   <th>Status</th>
+                  <th>Source</th>
                   <th>Type</th>
                   <th>Started</th>
                   <th>Duration</th>
@@ -96,6 +148,7 @@ export default async function DashboardPage() {
                     <td>
                       <StatusBadge value={backup.status} />
                     </td>
+                    <td>{backup.triggerSource}</td>
                     <td>{backup.backupType}</td>
                     <td>{formatTimestamp(backup.startedAt ?? backup.createdAt)}</td>
                     <td>{backup.durationSeconds ? `${backup.durationSeconds}s` : "-"}</td>

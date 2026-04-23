@@ -9,19 +9,93 @@ import { runCommand } from "@/lib/shell";
 import { logActivity } from "@/lib/services/logging";
 import { getAppSettings } from "@/lib/services/settings";
 
-type ProgressStep = "queued" | "checking" | "dumping-db" | "archiving-files" | "writing-manifest" | "complete";
+const BACKUP_SUCCESS_STATUS = "success" as const;
+const BACKUP_SUCCESS_WITH_WARNINGS_STATUS = "success_with_warnings" as const;
 
-function normalizeWarningMessage(message: string) {
+export const RESTORABLE_BACKUP_STATUSES = [
+  BACKUP_SUCCESS_STATUS,
+  BACKUP_SUCCESS_WITH_WARNINGS_STATUS,
+  "completed"
+] as const;
+
+export type BackupRunResult = {
+  backupId: string;
+  status: typeof BACKUP_SUCCESS_STATUS | typeof BACKUP_SUCCESS_WITH_WARNINGS_STATUS;
+  warningMessage: string | null;
+};
+
+// Default file exclusions for active WordPress sites. These are intentionally
+// code-visible for easy extension even before they are surfaced in the UI.
+export const DEFAULT_FILE_ARCHIVE_EXCLUSIONS = [
+  "html/wp-content/cache",
+  "html/wp-content/cache/*",
+  "html/wp-content/uploads/cache",
+  "html/wp-content/uploads/cache/*",
+  "html/wp-content/upgrade",
+  "html/wp-content/upgrade/*",
+  "html/wp-content/ai1wm-backups",
+  "html/wp-content/ai1wm-backups/*",
+  "html/wp-content/backups",
+  "html/wp-content/backups/*",
+  "html/wp-content/backup*",
+  "html/wp-content/wflogs",
+  "html/wp-content/wflogs/*",
+  "html/wp-content/debug.log",
+  "html/wp-content/tmp",
+  "html/wp-content/tmp/*",
+  "html/wp-content/temp",
+  "html/wp-content/temp/*",
+  "html/wp-content/sessions",
+  "html/wp-content/sessions/*",
+  "html/wp-content/logs",
+  "html/wp-content/logs/*"
+] as const;
+
+function getTriggerLabel(triggerSource: string) {
+  if (triggerSource === "schedule") {
+    return "Scheduled";
+  }
+
+  if (triggerSource === "bulk") {
+    return "Bulk";
+  }
+
+  return "Manual";
+}
+
+export function normalizeWarningMessage(message: string) {
   return message.trim().replace(/\s+/g, " ");
 }
 
-function isRecoverableTarWarning(code: number, stderr: string, archivePath: string) {
+export function isRecoverableTarWarning(code: number, stderr: string, archivePath: string) {
   if (code === 0) {
     return false;
   }
 
   const normalized = normalizeWarningMessage(stderr).toLowerCase();
   return code === 1 && pathExists(archivePath) && normalized.includes("file changed as we read it");
+}
+
+export function getSiteRootDirectory(site: Pick<Site, "backupDestination" | "slug">) {
+  const normalizedDestination = path.resolve(site.backupDestination);
+  const destinationName = path.basename(normalizedDestination);
+
+  return destinationName === site.slug
+    ? normalizedDestination
+    : path.join(normalizedDestination, site.slug);
+}
+
+export function getSiteBackupDirectory(site: Pick<Site, "backupDestination" | "slug">) {
+  return path.join(getSiteRootDirectory(site), "stackpress");
+}
+
+export function getPreRestoreSnapshotDirectory(site: Pick<Site, "backupDestination" | "slug">) {
+  return path.join(getSiteBackupDirectory(site), "pre-restore");
+}
+
+export function buildTarArgs(siteDirectory: string, filesArchivePath: string) {
+  const excludeArgs = DEFAULT_FILE_ARCHIVE_EXCLUSIONS.flatMap((pattern) => ["--exclude", pattern]);
+  return ["-czf", filesArchivePath, ...excludeArgs, "-C", siteDirectory, "html"];
 }
 
 async function updateJob(jobId: string, patch: Partial<BackupJob>) {
@@ -31,29 +105,54 @@ async function updateJob(jobId: string, patch: Partial<BackupJob>) {
   });
 }
 
-async function failJob(site: Site, jobId: string, error: unknown) {
+async function logBackupActivity(
+  level: "info" | "warn" | "error",
+  triggerSource: string,
+  site: Pick<Site, "id" | "name">,
+  backupId: string,
+  message: string,
+  meta?: Record<string, unknown>
+) {
+  await logActivity("backup", `${getTriggerLabel(triggerSource)} ${message} for ${site.name}`, level, {
+    siteId: site.id,
+    backupId,
+    triggerSource,
+    ...meta
+  });
+}
+
+function getAvailableDiskKb(dfOutput: string) {
+  const lines = dfOutput.trim().split("\n");
+  const fields = lines.at(-1)?.trim().split(/\s+/) ?? [];
+  return Number(fields[3] ?? 0);
+}
+
+async function failJob(site: Site, jobId: string, error: unknown, triggerSource: string) {
   const message = error instanceof Error ? error.message : "Unknown backup failure";
+  const failedAt = new Date();
+
   await updateJob(jobId, {
     status: "failed",
-    completedAt: new Date(),
+    completedAt: failedAt,
     errorMessage: message,
     progressStep: "failed"
   });
+
   await prisma.site.update({
     where: { id: site.id },
     data: {
-      lastBackupAt: new Date(),
+      lastBackupAt: failedAt,
       lastBackupStatus: "failed",
       lastBackupMessage: message
     }
   });
-  await logActivity("backup", `Backup failed for ${site.name}`, "error", {
-    siteId: site.id,
+
+  await logBackupActivity("error", triggerSource, site, jobId, "backup failed", {
     error: message
   });
 }
 
-export async function runBackup(siteId: string, triggerSource = "manual") {
+export async function runBackup(siteId: string, triggerSource = "manual"): Promise<BackupRunResult> {
   const site = await prisma.site.findUnique({ where: { id: siteId } });
   if (!site) {
     throw new Error("Site not found");
@@ -84,6 +183,10 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
     }
   });
 
+  await logBackupActivity("info", triggerSource, site, job.id, "backup started", {
+    backupType: site.backupMode
+  });
+
   try {
     if (!pathExists(site.siteDirectory)) {
       throw new Error("Site directory does not exist");
@@ -98,9 +201,7 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
       throw new Error(diskCheck.stderr || "Unable to determine free disk space");
     }
 
-    const lines = diskCheck.stdout.trim().split("\n");
-    const fields = lines.at(-1)?.trim().split(/\s+/) ?? [];
-    const availableKb = Number(fields[3] ?? 0);
+    const availableKb = getAvailableDiskKb(diskCheck.stdout);
     const thresholdKb = settings.diskFreeThresholdGb * 1024 * 1024;
     if (availableKb < thresholdKb) {
       throw new Error(
@@ -108,7 +209,7 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
       );
     }
 
-    const siteDestination = path.join(site.backupDestination, site.slug);
+    const siteDestination = getSiteBackupDirectory(site);
     ensureDirectory(siteDestination);
 
     const stamp = format(startedAt, "yyyy-MM-dd_HH-mm-ss");
@@ -120,7 +221,7 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
     if (site.backupMode !== "files") {
       await updateJob(job.id, { progressStep: "dumping-db" });
 
-      const dumpArgs = [
+      const dumpResult = await runCommand("docker", [
         "exec",
         site.dbContainerName,
         "mysqldump",
@@ -129,8 +230,7 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
         site.dbName,
         "--result-file",
         `/tmp/db-${stamp}.sql`
-      ];
-      const dumpResult = await runCommand("docker", dumpArgs);
+      ]);
       if (dumpResult.code !== 0) {
         throw new Error(dumpResult.stderr || "mysqldump command failed");
       }
@@ -149,7 +249,7 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
       await updateJob(job.id, { progressStep: "archiving-files" });
 
       const htmlPath = path.join(site.siteDirectory, "html");
-      const tarResult = await runCommand("tar", ["-czf", filesArchivePath, "-C", site.siteDirectory, "html"]);
+      const tarResult = await runCommand("tar", buildTarArgs(site.siteDirectory, filesArchivePath));
       const tarWarning = normalizeWarningMessage(tarResult.stderr);
 
       if (isRecoverableTarWarning(tarResult.code, tarResult.stderr, filesArchivePath)) {
@@ -174,18 +274,22 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
       filesArchivePath: fs.existsSync(filesArchivePath) ? filesArchivePath : null,
       dbBytes: getFileSize(dbDumpPath),
       filesBytes: getFileSize(filesArchivePath),
-      warnings
+      warnings,
+      fileExclusions: [...DEFAULT_FILE_ARCHIVE_EXCLUSIONS]
     };
 
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
     const totalBytes = BigInt(getFileSize(dbDumpPath) + getFileSize(filesArchivePath));
     const completedAt = new Date();
-    const warningMessage =
-      warnings.length > 0 ? `Backup completed with warnings: ${warnings.join(" | ")}` : null;
+    const hasWarnings = warnings.length > 0;
+    const finalStatus = hasWarnings ? BACKUP_SUCCESS_WITH_WARNINGS_STATUS : BACKUP_SUCCESS_STATUS;
+    const warningMessage = hasWarnings
+      ? `Backup completed with warnings: ${warnings.join(" | ")}`
+      : null;
 
     await updateJob(job.id, {
-      status: "completed",
+      status: finalStatus,
       completedAt,
       durationSeconds: Math.max(1, Math.round((completedAt.getTime() - startedAt.getTime()) / 1000)),
       totalBytes,
@@ -201,26 +305,34 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
       where: { id: site.id },
       data: {
         lastBackupAt: completedAt,
-        lastBackupStatus: "completed",
+        lastBackupStatus: finalStatus,
         lastBackupMessage: warningMessage ?? "Backup completed successfully"
       }
     });
 
     await enforceRetention(site.id);
-    await logActivity(
-      "backup",
-      warnings.length > 0
-        ? `Backup completed with warnings for ${site.name}`
-        : `Backup completed for ${site.name}`,
-      warnings.length > 0 ? "warn" : "info",
+    await logBackupActivity(
+      hasWarnings ? "warn" : "info",
+      triggerSource,
+      site,
+      job.id,
+      hasWarnings ? "backup completed with warnings" : "backup completed",
       {
-        siteId: site.id,
         storageBytes: getDirectoryUsage(siteDestination),
-        warnings
+        warnings,
+        siteDestination,
+        fileExclusions: DEFAULT_FILE_ARCHIVE_EXCLUSIONS,
+        status: finalStatus
       }
     );
+
+    return {
+      backupId: job.id,
+      status: finalStatus,
+      warningMessage
+    };
   } catch (error) {
-    await failJob(site, job.id, error);
+    await failJob(site, job.id, error, triggerSource);
     throw error;
   }
 }
@@ -232,7 +344,7 @@ export async function enforceRetention(siteId: string) {
   }
 
   const backups = await prisma.backupJob.findMany({
-    where: { siteId, status: "completed" },
+    where: { siteId, status: { in: [...RESTORABLE_BACKUP_STATUSES] } },
     orderBy: { completedAt: "desc" }
   });
 

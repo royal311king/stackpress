@@ -1,11 +1,13 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { AutoRefresh } from "@/components/auto-refresh";
 import { PageHeader, SectionCard } from "@/components/cards";
-import { ActionButton, DeleteBackupButton, SiteForm } from "@/components/forms";
+import { ActionButton, DeleteBackupButton, RestoreBackupButton, SiteForm } from "@/components/forms";
 import { StatusBadge } from "@/components/status-badge";
 import { prisma } from "@/lib/prisma";
-import { getNextRunForSite } from "@/lib/services/scheduler";
+import { RESTORABLE_BACKUP_STATUSES } from "@/lib/services/backup";
+import { formatScheduleTime, getNextRunForSite, getScheduleLabel, isScheduleActive, isValidSchedule } from "@/lib/services/scheduler";
 import { formatBytes, formatTimestamp } from "@/lib/utils";
 
 export default async function SiteDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -25,6 +27,23 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
   }
 
   const nextRun = getNextRunForSite(site);
+  const lastScheduledBackup = await prisma.backupJob.findFirst({
+    where: {
+      siteId: site.id,
+      triggerSource: "schedule"
+    },
+    orderBy: { createdAt: "desc" }
+  });
+  const latestRestorableBackup = await prisma.backupJob.findFirst({
+    where: {
+      siteId: site.id,
+      status: { in: [...RESTORABLE_BACKUP_STATUSES] }
+    },
+    orderBy: { completedAt: "desc" }
+  });
+  const scheduleState = isScheduleActive(site) ? (isValidSchedule(site) ? "enabled" : "invalid") : "disabled";
+  const scheduleLabel = getScheduleLabel(site);
+  const nextRunLabel = formatScheduleTime(nextRun, site.timezone);
 
   return (
     <div>
@@ -35,11 +54,14 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
         actions={
           <>
             <ActionButton endpoint={`/api/sites/${site.id}/backup`} label="Backup Now" variant="primary" />
-            <ActionButton
+            <RestoreBackupButton
               endpoint={`/api/sites/${site.id}/restore`}
               label="Restore Latest"
-              variant="danger"
-              confirmMessage="Restore the latest backup? This stops containers and overwrites site data."
+              backupType={latestRestorableBackup?.backupType ?? "full"}
+              backupTimestamp={latestRestorableBackup ? formatTimestamp(latestRestorableBackup.startedAt ?? latestRestorableBackup.createdAt) : "Latest successful backup"}
+              dbDumpPath={latestRestorableBackup?.dbDumpPath}
+              filesArchivePath={latestRestorableBackup?.filesArchivePath}
+              detailMessage={latestRestorableBackup ? latestRestorableBackup.logExcerpt ?? latestRestorableBackup.errorMessage ?? null : "StackPress will restore the latest successful backup for this site."}
             />
           </>
         }
@@ -57,11 +79,23 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
               <p className="mt-2 text-sm text-slate-200">{site.lastBackupMessage ?? "No backup has run yet."}</p>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
-              <p className="text-sm text-slate-400">Next run</p>
-              <p className="mt-3 text-xl font-semibold">{nextRun ? formatTimestamp(nextRun) : "Not scheduled"}</p>
-              <p className="mt-3 text-sm text-slate-400">
-                Frequency {site.scheduleEnabled ? site.backupFrequency : "disabled"} • Timezone {site.timezone}
-              </p>
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-slate-400">Schedule</p>
+                <StatusBadge value={scheduleState} />
+              </div>
+              <p className="mt-3 text-xl font-semibold">{nextRunLabel}</p>
+              <div className="mt-3 space-y-2 text-sm text-slate-400">
+                <p>Rule {scheduleLabel}</p>
+                <p>Timezone {site.timezone}</p>
+                <p>Last scheduled run {lastScheduledBackup ? formatTimestamp(lastScheduledBackup.startedAt ?? lastScheduledBackup.createdAt) : "Never"}</p>
+                <div className="flex items-center gap-2">
+                  <span>Last scheduled result</span>
+                  <StatusBadge value={lastScheduledBackup?.status ?? (scheduleState === "disabled" ? "manual" : "queued")} />
+                </div>
+                {site.backupFrequency === "cron" && (
+                  <p>Cron expression {site.cronExpression ?? "Not configured"}</p>
+                )}
+              </div>
             </div>
           </div>
 
@@ -93,37 +127,50 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
                 <tr>
                   <th>Timestamp</th>
                   <th>Status</th>
+                  <th>Source</th>
                   <th>Step</th>
                   <th>Type</th>
                   <th>Size</th>
                   <th>Duration</th>
+                  <th>Notes</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {site.backups.map((backup) => (
-                  <tr key={backup.id}>
-                    <td>{formatTimestamp(backup.startedAt ?? backup.createdAt)}</td>
-                    <td>
-                      <StatusBadge value={backup.status} />
-                    </td>
-                    <td>{backup.progressStep ?? "-"}</td>
-                    <td>{backup.backupType}</td>
-                    <td>{formatBytes(backup.totalBytes)}</td>
-                    <td>{backup.durationSeconds ? `${backup.durationSeconds}s` : "-"}</td>
-                    <td>
-                      <div className="flex flex-wrap gap-2">
-                        <ActionButton
-                          endpoint={`/api/sites/${site.id}/restore?backupId=${backup.id}`}
-                          label="Restore"
-                          variant="secondary"
-                          confirmMessage="Restore this backup? This stops containers and overwrites site data."
-                        />
-                        <DeleteBackupButton endpoint={`/api/backups/${backup.id}/delete`} />
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                {site.backups.map((backup) => {
+                  const detailMessage = backup.logExcerpt ?? backup.errorMessage ?? "-";
+
+                  return (
+                    <tr key={backup.id}>
+                      <td>{formatTimestamp(backup.startedAt ?? backup.createdAt)}</td>
+                      <td>
+                        <StatusBadge value={backup.status} />
+                      </td>
+                      <td>{backup.triggerSource}</td>
+                      <td>{backup.progressStep ?? "-"}</td>
+                      <td>{backup.backupType}</td>
+                      <td>{formatBytes(backup.totalBytes)}</td>
+                      <td>{backup.durationSeconds ? `${backup.durationSeconds}s` : "-"}</td>
+                      <td className="max-w-xs text-sm text-slate-300">{detailMessage}</td>
+                      <td>
+                        <div className="flex flex-wrap gap-2">
+                          <Link className="btn btn-secondary" href={`/backups/${backup.id}`}>
+                            Details
+                          </Link>
+                          <RestoreBackupButton
+                            endpoint={`/api/sites/${site.id}/restore?backupId=${backup.id}`}
+                            backupType={backup.backupType}
+                            backupTimestamp={formatTimestamp(backup.startedAt ?? backup.createdAt)}
+                            dbDumpPath={backup.dbDumpPath}
+                            filesArchivePath={backup.filesArchivePath}
+                            detailMessage={detailMessage !== "-" ? detailMessage : null}
+                          />
+                          <DeleteBackupButton endpoint={`/api/backups/${backup.id}/delete`} />
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

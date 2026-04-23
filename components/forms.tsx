@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 
 type SiteFormProps = {
   site?: Record<string, unknown>;
@@ -14,10 +14,45 @@ function checkboxValue(formData: FormData, field: string) {
   return formData.get(field) === "on";
 }
 
+function basename(value?: string | null) {
+  if (!value) {
+    return null;
+  }
+
+  const normalized = value.replace(/\\/g, "/");
+  return normalized.split("/").filter(Boolean).at(-1) ?? value;
+}
+
+function getRestoreValidation(backupType: string, dbDumpPath?: string | null, filesArchivePath?: string | null) {
+  if (backupType === "full") {
+    if (!dbDumpPath && !filesArchivePath) {
+      return "This full backup is missing both the database dump and the file archive.";
+    }
+    if (!dbDumpPath) {
+      return "This full backup is missing the database dump.";
+    }
+    if (!filesArchivePath) {
+      return "This full backup is missing the file archive.";
+    }
+    return null;
+  }
+
+  if (backupType === "database" && !dbDumpPath) {
+    return "This database-only backup is missing the SQL dump.";
+  }
+
+  if (backupType === "files" && !filesArchivePath) {
+    return "This files-only backup is missing the archive.";
+  }
+
+  return null;
+}
+
 export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteFormProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
+  const [messageTone, setMessageTone] = useState<"success" | "warn" | "error">("success");
   const [detecting, setDetecting] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({
     name: String(site?.name ?? ""),
@@ -46,6 +81,7 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
   async function onDetect() {
     setDetecting(true);
     setMessage(null);
+    setMessageTone("success");
     const response = await fetch(detectEndpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -53,6 +89,7 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
     });
     const data = await response.json();
     if (!response.ok) {
+      setMessageTone("error");
       setMessage(data.error ?? "Detection failed");
       setDetecting(false);
       return;
@@ -62,6 +99,7 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
       ...current,
       name: data.siteName ?? current.name,
       slug: data.slug ?? current.slug,
+      siteDirectory: data.siteDirectory ?? current.siteDirectory,
       dbContainerName: data.dbContainerName ?? current.dbContainerName,
       dbName: data.dbName ?? current.dbName,
       dbUser: data.dbUser ?? current.dbUser,
@@ -69,7 +107,13 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
       wordpressContainerName: data.wordpressContainerName ?? current.wordpressContainerName,
       uploadsPath: data.uploadsPath ?? current.uploadsPath
     }));
-    setMessage("Docker compose settings detected and applied.");
+    if (Array.isArray(data.warnings) && data.warnings.length > 0) {
+      setMessageTone("warn");
+      setMessage(`Detected site settings with warnings: ${data.warnings.join(" ")}`);
+    } else {
+      setMessageTone("success");
+      setMessage("Docker compose settings detected and applied.");
+    }
     setDetecting(false);
   }
 
@@ -116,6 +160,7 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
       });
       const data = await response.json();
       if (!response.ok) {
+        setMessageTone("error");
         setMessage(data.error ?? "Save failed");
         return;
       }
@@ -240,7 +285,9 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
         </label>
       </div>
 
-      {message ? <p className="text-sm text-emerald-200">{message}</p> : null}
+      {message ? (
+        <p className={`text-sm ${messageTone === "error" ? "text-rose-200" : messageTone === "warn" ? "text-amber-200" : "text-emerald-200"}`}>{message}</p>
+      ) : null}
 
       <div className="flex flex-wrap gap-3">
         <button type="submit" className="btn btn-primary" disabled={pending}>
@@ -287,6 +334,210 @@ export function ActionButton({ endpoint, label, variant = "secondary", confirmMe
     >
       {pending ? "Working..." : label}
     </button>
+  );
+}
+
+type RestoreBackupButtonProps = {
+  endpoint: string;
+  label?: string;
+  backupType: string;
+  backupTimestamp: string;
+  dbDumpPath?: string | null;
+  filesArchivePath?: string | null;
+  detailMessage?: string | null;
+};
+
+export function RestoreBackupButton({
+  endpoint,
+  label = "Restore",
+  backupType,
+  backupTimestamp,
+  dbDumpPath,
+  filesArchivePath,
+  detailMessage
+}: RestoreBackupButtonProps) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+  const [snapshotFailure, setSnapshotFailure] = useState<string | null>(null);
+  const [createSafetySnapshot, setCreateSafetySnapshot] = useState(true);
+
+  const localValidationError = useMemo(
+    () => getRestoreValidation(backupType, dbDumpPath, filesArchivePath),
+    [backupType, dbDumpPath, filesArchivePath]
+  );
+
+  async function submitRestore(continueWithoutSafetySnapshot: boolean) {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        createSafetySnapshot,
+        continueWithoutSafetySnapshot
+      })
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 409 && data.snapshotFailure) {
+        setSnapshotFailure(data.error ?? "Safety snapshot failed");
+        setError(null);
+        return;
+      }
+
+      setError(data.error ?? "Restore failed");
+      setSnapshotFailure(null);
+      return;
+    }
+
+    setSnapshotFailure(null);
+    setError(null);
+    setOpen(false);
+    router.refresh();
+  }
+
+  return (
+    <>
+      <button className="btn btn-secondary" type="button" onClick={() => setOpen(true)}>
+        {label}
+      </button>
+
+      {open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6">
+          <div className="panel w-full max-w-2xl rounded-3xl p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-amber-300/80">Destructive Restore</p>
+                <h3 className="mt-2 text-2xl font-semibold">Restore Selected Backup</h3>
+                <p className="mt-2 text-sm text-slate-400">
+                  This will stop containers, overwrite current site data, and restore the selected recovery point.
+                </p>
+              </div>
+              <button
+                className="btn btn-secondary"
+                type="button"
+                disabled={pending}
+                onClick={() => {
+                  setOpen(false);
+                  setError(null);
+                  setSnapshotFailure(null);
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p className="text-sm text-slate-400">Backup timestamp</p>
+                <p className="mt-2 text-base text-slate-100">{backupTimestamp}</p>
+                <p className="mt-4 text-sm text-slate-400">Backup type</p>
+                <p className="mt-2 text-base text-slate-100 capitalize">{backupType}</p>
+              </div>
+              <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p className="text-sm text-slate-400">Artifacts</p>
+                <div className="mt-2 space-y-2 text-sm text-slate-200">
+                  <p>DB: {basename(dbDumpPath) ?? "Missing"}</p>
+                  <p>Files: {basename(filesArchivePath) ?? "Missing"}</p>
+                </div>
+              </div>
+            </div>
+
+            {detailMessage ? (
+              <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4">
+                <p className="text-sm text-slate-400">Backup notes</p>
+                <p className="mt-2 text-sm text-slate-200">{detailMessage}</p>
+              </div>
+            ) : null}
+
+            <div className="mt-4 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100">
+              Restores are destructive. Current WordPress files and database state will be replaced by the selected backup. A safety snapshot can give you an emergency rollback point if you need to undo the restore.
+            </div>
+
+            <label className="mt-4 flex items-start gap-3 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-200">
+              <input
+                type="checkbox"
+                checked={createSafetySnapshot}
+                disabled={pending}
+                onChange={(event) => setCreateSafetySnapshot(event.target.checked)}
+              />
+              <span>
+                Create safety snapshot before restore
+                <span className="mt-1 block text-xs text-slate-400">
+                  StackPress will save a pre-restore database dump and try to archive the current site files under the site&apos;s `stackpress/pre-restore` folder.
+                </span>
+              </span>
+            </label>
+
+            {localValidationError ? (
+              <div className="mt-4 rounded-2xl border border-rose-400/25 bg-rose-400/10 p-4 text-sm text-rose-100">
+                {localValidationError}
+              </div>
+            ) : null}
+
+            {snapshotFailure ? (
+              <div className="mt-4 rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">
+                <p>{snapshotFailure}</p>
+                <p className="mt-2 text-xs text-amber-50/80">
+                  The restore has not started yet. You can continue without the safety snapshot or cancel and investigate first.
+                </p>
+              </div>
+            ) : null}
+
+            {error ? (
+              <div className="mt-4 rounded-2xl border border-rose-400/25 bg-rose-400/10 p-4 text-sm text-rose-100">
+                {error}
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                className="btn btn-danger"
+                type="button"
+                disabled={pending || Boolean(localValidationError)}
+                onClick={() => {
+                  setError(null);
+                  setSnapshotFailure(null);
+                  startTransition(async () => {
+                    await submitRestore(false);
+                  });
+                }}
+              >
+                {pending ? "Restoring..." : "Confirm Restore"}
+              </button>
+              {snapshotFailure ? (
+                <button
+                  className="btn btn-secondary"
+                  type="button"
+                  disabled={pending}
+                  onClick={() => {
+                    setError(null);
+                    startTransition(async () => {
+                      await submitRestore(true);
+                    });
+                  }}
+                >
+                  {pending ? "Restoring..." : "Continue Without Snapshot"}
+                </button>
+              ) : null}
+              <button
+                className="btn btn-secondary"
+                type="button"
+                disabled={pending}
+                onClick={() => {
+                  setOpen(false);
+                  setError(null);
+                  setSnapshotFailure(null);
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
   );
 }
 

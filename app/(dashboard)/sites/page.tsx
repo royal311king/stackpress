@@ -2,12 +2,38 @@ import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/cards";
 import { SiteForm } from "@/components/forms";
 import { StatusBadge } from "@/components/status-badge";
-import { formatRelative } from "@/lib/utils";
+import { formatRelative, formatTimestamp } from "@/lib/utils";
+import { formatScheduleTime, getNextRunForSite, getScheduleLabel, isScheduleActive, isValidSchedule } from "@/lib/services/scheduler";
 
 export default async function SitesPage() {
   const sites = await prisma.site.findMany({
+    include: {
+      backups: {
+        orderBy: { createdAt: "desc" },
+        take: 1
+      }
+    },
     orderBy: { updatedAt: "desc" }
   });
+
+  const scheduleData = await Promise.all(
+    sites.map(async (site) => {
+      const nextRun = getNextRunForSite(site);
+      const lastScheduledBackup = await prisma.backupJob.findFirst({
+        where: { siteId: site.id, triggerSource: "schedule" },
+        orderBy: { createdAt: "desc" }
+      });
+
+      return {
+        ...site,
+        nextRun,
+        nextRunLabel: formatScheduleTime(nextRun, site.timezone),
+        scheduleLabel: getScheduleLabel(site),
+        scheduleState: isScheduleActive(site) ? (isValidSchedule(site) ? "enabled" : "invalid") : "disabled",
+        lastScheduledBackup
+      };
+    })
+  );
 
   return (
     <div>
@@ -19,7 +45,7 @@ export default async function SitesPage() {
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
         <SectionCard title="Configured Sites" description="Each site stores paths, Docker names, credentials, notes, and schedule state.">
           <div className="space-y-3">
-            {sites.map((site) => (
+            {scheduleData.map((site) => (
               <a
                 key={site.id}
                 href={`/sites/${site.id}`}
@@ -32,8 +58,19 @@ export default async function SitesPage() {
                     <p className="mt-2 text-sm text-slate-500">
                       Last backup {formatRelative(site.lastBackupAt)} • Destination {site.backupDestination}
                     </p>
+                    <div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-400">
+                      <span>Schedule: {site.scheduleLabel}</span>
+                      <span>Next run: {site.nextRunLabel}</span>
+                      <span>
+                        Last scheduled run: {site.lastScheduledBackup ? formatTimestamp(site.lastScheduledBackup.startedAt ?? site.lastScheduledBackup.createdAt) : "Never"}
+                      </span>
+                    </div>
                   </div>
-                  <StatusBadge value={site.active ? "active" : "inactive"} />
+                  <div className="flex flex-col items-end gap-2">
+                    <StatusBadge value={site.active ? "active" : "inactive"} />
+                    <StatusBadge value={site.scheduleState} />
+                    <StatusBadge value={site.lastScheduledBackup?.status ?? (site.scheduleState === "disabled" ? "manual" : "queued")} />
+                  </div>
                 </div>
               </a>
             ))}
