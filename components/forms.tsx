@@ -55,6 +55,7 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
   const [messageTone, setMessageTone] = useState<"success" | "warn" | "error">("success");
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [detecting, setDetecting] = useState(false);
   const [values, setValues] = useState<Record<string, string>>({
     name: String(site?.name ?? ""),
@@ -121,11 +122,21 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
 
   function updateField(key: string, value: string) {
     setValues((current) => ({ ...current, [key]: value }));
+    setFieldErrors((current) => {
+      if (!current[key]) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
   }
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setMessage(null);
+    setFieldErrors({});
 
     const formData = new FormData(event.currentTarget);
     const payload = {
@@ -164,11 +175,22 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
       if (!response.ok) {
         setMessageTone("error");
         setMessage(data.error ?? "Save failed");
+        setFieldErrors(data.fieldErrors ?? {});
         return;
       }
       router.refresh();
       router.push(data.redirectTo ?? "/sites");
     });
+  }
+
+  function getFieldClassName(field: string, extra = "") {
+    return `${fieldErrors[field] ? "border-rose-400/45" : ""} ${extra}`.trim();
+  }
+
+  function renderFieldError(field: string) {
+    return fieldErrors[field] ? (
+      <p className="mt-2 text-sm text-rose-200">{fieldErrors[field]}</p>
+    ) : null;
   }
 
   const messageClassName =
@@ -186,24 +208,26 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
       >
         <div className="grid gap-5 lg:grid-cols-2">
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-200">Site Name</span>
+            <span className="mb-2 block text-sm font-medium text-slate-200">Site Name <span className="text-rose-300">*</span></span>
             <input
-              className="input"
+              className={getFieldClassName("name", "input")}
               name="name"
               value={values.name}
               onChange={(e) => updateField("name", e.target.value)}
               placeholder="My WordPress Site"
             />
+            {renderFieldError("name")}
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-200">Site Slug</span>
+            <span className="mb-2 block text-sm font-medium text-slate-200">Site Slug <span className="text-rose-300">*</span></span>
             <input
-              className="input"
+              className={getFieldClassName("slug", "input")}
               name="slug"
               value={values.slug}
               onChange={(e) => updateField("slug", e.target.value)}
               placeholder="my-wordpress-site"
             />
+            {renderFieldError("slug")}
           </label>
           <label className="block lg:col-span-2">
             <span className="mb-2 block text-sm font-medium text-slate-200">Notes</span>
@@ -222,44 +246,47 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
         title="Paths & Storage"
         description="Use container-visible paths such as /mnt/wp-sites and /mnt/wp-backups."
       >
-        <div className="grid gap-5 xl:grid-cols-[1fr_1fr_auto]">
-          <label className="block xl:col-span-2">
-            <span className="mb-2 block text-sm font-medium text-slate-200">Site Directory</span>
+        <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_auto]">
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Site Directory <span className="text-rose-300">*</span></span>
             <input
-              className="input font-mono text-sm"
+              className={getFieldClassName("siteDirectory", "input font-mono text-sm")}
               name="siteDirectory"
               value={values.siteDirectory}
               onChange={(e) => updateField("siteDirectory", e.target.value)}
               placeholder="/mnt/wp-sites/example-site"
               spellCheck={false}
             />
+            {renderFieldError("siteDirectory")}
           </label>
-          <div className="flex items-end xl:col-span-1">
-            <button type="button" onClick={onDetect} className="btn btn-secondary w-full" disabled={detecting}>
+          <div className="flex items-end">
+            <button type="button" onClick={onDetect} className="btn btn-secondary w-full xl:min-w-64" disabled={detecting}>
               {detecting ? "Detecting..." : "Auto-Detect docker-compose"}
             </button>
           </div>
-          <label className="block xl:col-span-3">
-            <span className="mb-2 block text-sm font-medium text-slate-200">Backup Destination</span>
+          <label className="block xl:col-span-2">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Backup Destination <span className="text-rose-300">*</span></span>
             <input
-              className="input font-mono text-sm"
+              className={getFieldClassName("backupDestination", "input font-mono text-sm")}
               name="backupDestination"
               value={values.backupDestination}
               onChange={(e) => updateField("backupDestination", e.target.value)}
               placeholder="/mnt/wp-backups/example-site"
               spellCheck={false}
             />
+            {renderFieldError("backupDestination")}
           </label>
-          <label className="block xl:col-span-3">
-            <span className="mb-2 block text-sm font-medium text-slate-200">Uploads Path</span>
+          <label className="block xl:col-span-2">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Uploads Path <span className="text-rose-300">*</span></span>
             <input
-              className="input font-mono text-sm"
+              className={getFieldClassName("uploadsPath", "input font-mono text-sm")}
               name="uploadsPath"
               value={values.uploadsPath}
               onChange={(e) => updateField("uploadsPath", e.target.value)}
               placeholder="/mnt/wp-sites/example-site/html/wp-content/uploads"
               spellCheck={false}
             />
+            {renderFieldError("uploadsPath")}
           </label>
         </div>
       </SectionCard>
@@ -268,38 +295,33 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
         title="Docker & Database"
         description="Container and database credentials used for backup and restore commands."
       >
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-5">
-          <label className="block xl:col-span-2">
-            <span className="mb-2 block text-sm font-medium text-slate-200">DB Container</span>
-            <input
-              className="input font-mono text-sm"
-              name="dbContainerName"
-              value={values.dbContainerName}
-              onChange={(e) => updateField("dbContainerName", e.target.value)}
-              spellCheck={false}
-            />
-          </label>
-          <label className="block xl:col-span-2">
-            <span className="mb-2 block text-sm font-medium text-slate-200">WordPress Container</span>
-            <input
-              className="input font-mono text-sm"
-              name="wordpressContainerName"
-              value={values.wordpressContainerName}
-              onChange={(e) => updateField("wordpressContainerName", e.target.value)}
-              spellCheck={false}
-            />
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-2">
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">DB Container <span className="text-rose-300">*</span></span>
+            <input className={getFieldClassName("dbContainerName", "input font-mono text-sm")} name="dbContainerName" value={values.dbContainerName} onChange={(e) => updateField("dbContainerName", e.target.value)} spellCheck={false} />
+            {renderFieldError("dbContainerName")}
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-200">DB Name</span>
-            <input className="input" name="dbName" value={values.dbName} onChange={(e) => updateField("dbName", e.target.value)} />
+            <span className="mb-2 block text-sm font-medium text-slate-200">WordPress Container <span className="text-rose-300">*</span></span>
+            <input className={getFieldClassName("wordpressContainerName", "input font-mono text-sm")} name="wordpressContainerName" value={values.wordpressContainerName} onChange={(e) => updateField("wordpressContainerName", e.target.value)} spellCheck={false} />
+            {renderFieldError("wordpressContainerName")}
+          </label>
+        </div>
+        <div className="mt-5 grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <label className="block">
+            <span className="mb-2 block text-sm font-medium text-slate-200">DB Name <span className="text-rose-300">*</span></span>
+            <input className={getFieldClassName("dbName", "input")} name="dbName" value={values.dbName} onChange={(e) => updateField("dbName", e.target.value)} />
+            {renderFieldError("dbName")}
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-200">DB User</span>
-            <input className="input" name="dbUser" value={values.dbUser} onChange={(e) => updateField("dbUser", e.target.value)} />
+            <span className="mb-2 block text-sm font-medium text-slate-200">DB User <span className="text-rose-300">*</span></span>
+            <input className={getFieldClassName("dbUser", "input")} name="dbUser" value={values.dbUser} onChange={(e) => updateField("dbUser", e.target.value)} />
+            {renderFieldError("dbUser")}
           </label>
-          <label className="block md:col-span-2 xl:col-span-2">
-            <span className="mb-2 block text-sm font-medium text-slate-200">DB Password</span>
-            <input className="input" name="dbPassword" value={values.dbPassword} onChange={(e) => updateField("dbPassword", e.target.value)} />
+          <label className="block md:col-span-2 xl:col-span-1">
+            <span className="mb-2 block text-sm font-medium text-slate-200">DB Password <span className="text-rose-300">*</span></span>
+            <input className={getFieldClassName("dbPassword", "input")} name="dbPassword" value={values.dbPassword} onChange={(e) => updateField("dbPassword", e.target.value)} />
+            {renderFieldError("dbPassword")}
           </label>
         </div>
       </SectionCard>
@@ -308,7 +330,7 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
         title="Backup Schedule"
         description="Choose when StackPress should run automatic backups."
       >
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-2">
           <label className="block">
             <span className="mb-2 block text-sm font-medium text-slate-200">Backup Frequency</span>
             <select className="select" name="backupFrequency" value={values.backupFrequency} onChange={(e) => updateField("backupFrequency", e.target.value)}>
@@ -324,10 +346,11 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
             <input className="input" type="time" name="backupTime" value={values.backupTime} onChange={(e) => updateField("backupTime", e.target.value)} />
           </label>
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-200">Timezone</span>
-            <input className="input" name="timezone" value={values.timezone} onChange={(e) => updateField("timezone", e.target.value)} spellCheck={false} />
+            <span className="mb-2 block text-sm font-medium text-slate-200">Timezone <span className="text-rose-300">*</span></span>
+            <input className={getFieldClassName("timezone", "input")} name="timezone" value={values.timezone} onChange={(e) => updateField("timezone", e.target.value)} spellCheck={false} />
+            {renderFieldError("timezone")}
           </label>
-          <label className="block xl:col-span-4">
+          <label className="block">
             <span className="mb-2 block text-sm font-medium text-slate-200">Cron Expression</span>
             <input className="input font-mono text-sm" name="cronExpression" value={values.cronExpression} onChange={(e) => updateField("cronExpression", e.target.value)} placeholder="0 2 * * *" spellCheck={false} />
           </label>
@@ -350,26 +373,27 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
         title="Retention & Cleanup"
         description="Controls how many backup points StackPress keeps."
       >
-        <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-5 md:grid-cols-2">
           <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-200">Retention Count</span>
-            <input className="input" type="number" min="1" max="100" name="retentionCount" value={values.retentionCount} onChange={(e) => updateField("retentionCount", e.target.value)} />
+            <span className="mb-2 block text-sm font-medium text-slate-200">Retention Count <span className="text-rose-300">*</span></span>
+            <input className={getFieldClassName("retentionCount", "input")} type="number" min="1" max="100" name="retentionCount" value={values.retentionCount} onChange={(e) => updateField("retentionCount", e.target.value)} />
+            {renderFieldError("retentionCount")}
           </label>
           <label className="block">
             <span className="mb-2 block text-sm font-medium text-slate-200">Delete Older Than Days</span>
             <input className="input" type="number" min="1" name="retentionDays" value={values.retentionDays} onChange={(e) => updateField("retentionDays", e.target.value)} />
           </label>
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 xl:self-end">
-            <label className="flex items-start gap-3 text-sm text-slate-200">
-              <input type="checkbox" name="neverDeleteNewest" checked={neverDeleteNewest} onChange={(e) => setNeverDeleteNewest(e.target.checked)} />
-              <span>
-                Never Delete Newest
-                <span className="mt-1 block text-xs text-slate-400">
-                  Keeps the most recent successful backup even when other retention rules would remove it.
-                </span>
+        </div>
+        <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4">
+          <label className="flex items-start gap-3 text-sm text-slate-200">
+            <input type="checkbox" name="neverDeleteNewest" checked={neverDeleteNewest} onChange={(e) => setNeverDeleteNewest(e.target.checked)} />
+            <span>
+              Never Delete Newest
+              <span className="mt-1 block text-xs text-slate-400">
+                Keeps the most recent successful backup even when other retention rules would remove it.
               </span>
-            </label>
-          </div>
+            </span>
+          </label>
         </div>
       </SectionCard>
 
@@ -377,16 +401,16 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
         title="Backup Mode"
         description="Choose what gets backed up and whether this site is active."
       >
-        <div className="grid gap-5 md:grid-cols-2">
-          <label className="block">
-            <span className="mb-2 block text-sm font-medium text-slate-200">Backup Mode</span>
+        <div className="space-y-5">
+          <label className="block max-w-xl">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Backup Mode <span className="text-rose-300">*</span></span>
             <select className="select" name="backupMode" value={values.backupMode} onChange={(e) => updateField("backupMode", e.target.value)}>
               <option value="full">Full Backup</option>
               <option value="database">Database Only</option>
               <option value="files">Files Only</option>
             </select>
           </label>
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-4 md:self-end">
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
             <label className="flex items-start gap-3 text-sm text-slate-200">
               <input type="checkbox" name="active" checked={active} onChange={(e) => setActive(e.target.checked)} />
               <span>
@@ -406,19 +430,17 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
         </div>
       ) : null}
 
-      <div className="sticky bottom-4 z-10 rounded-3xl border border-white/10 bg-slate-950/88 p-4 shadow-[0_20px_50px_rgba(1,9,20,0.45)] backdrop-blur">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-slate-400">
-            Review the detected paths and container names before saving. You can adjust any field manually.
-          </p>
-          <div className="flex flex-wrap gap-3">
-            <button type="submit" className="btn btn-primary min-w-36" disabled={pending}>
-              {pending ? "Saving..." : "Save Site"}
-            </button>
-            <button type="button" className="btn btn-secondary min-w-28" onClick={() => router.push("/sites")}>
-              Cancel
-            </button>
-          </div>
+      <div className="flex flex-col gap-3 border-t border-white/10 pt-2 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-slate-400">
+          Review the detected paths and container names before saving. You can adjust any field manually.
+        </p>
+        <div className="flex flex-wrap gap-3">
+          <button type="submit" className="btn btn-primary min-w-36" disabled={pending}>
+            {pending ? "Saving..." : "Save Site"}
+          </button>
+          <button type="button" className="btn btn-secondary min-w-28" onClick={() => router.push("/sites")}>
+            Cancel
+          </button>
         </div>
       </div>
     </form>

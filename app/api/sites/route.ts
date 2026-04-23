@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { ZodError } from "zod";
 
 import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/services/logging";
-import { siteSchema } from "@/lib/validators";
+import { formatSiteValidationError, siteSchema } from "@/lib/validators";
 import { slugify } from "@/lib/utils";
 
 export async function POST(request: NextRequest) {
@@ -24,6 +25,14 @@ export async function POST(request: NextRequest) {
       redirectTo: `/sites/${site.id}`
     });
   } catch (error) {
+    if (error instanceof ZodError) {
+      const formatted = formatSiteValidationError(error);
+      return NextResponse.json(
+        { error: formatted.summary, fieldErrors: formatted.fieldErrors },
+        { status: 400 }
+      );
+    }
+
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Failed to create site" },
       { status: 400 }
