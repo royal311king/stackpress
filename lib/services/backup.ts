@@ -11,6 +11,19 @@ import { getAppSettings } from "@/lib/services/settings";
 
 type ProgressStep = "queued" | "checking" | "dumping-db" | "archiving-files" | "writing-manifest" | "complete";
 
+function normalizeWarningMessage(message: string) {
+  return message.trim().replace(/\s+/g, " ");
+}
+
+function isRecoverableTarWarning(code: number, stderr: string, archivePath: string) {
+  if (code === 0) {
+    return false;
+  }
+
+  const normalized = normalizeWarningMessage(stderr).toLowerCase();
+  return code === 1 && pathExists(archivePath) && normalized.includes("file changed as we read it");
+}
+
 async function updateJob(jobId: string, patch: Partial<BackupJob>) {
   return prisma.backupJob.update({
     where: { id: jobId },
@@ -102,6 +115,7 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
     const dbDumpPath = path.join(siteDestination, `db-${stamp}.sql`);
     const filesArchivePath = path.join(siteDestination, `files-${stamp}.tar.gz`);
     const manifestPath = path.join(siteDestination, `manifest-${stamp}.json`);
+    const warnings: string[] = [];
 
     if (site.backupMode !== "files") {
       await updateJob(job.id, { progressStep: "dumping-db" });
@@ -136,7 +150,11 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
 
       const htmlPath = path.join(site.siteDirectory, "html");
       const tarResult = await runCommand("tar", ["-czf", filesArchivePath, "-C", site.siteDirectory, "html"]);
-      if (tarResult.code !== 0) {
+      const tarWarning = normalizeWarningMessage(tarResult.stderr);
+
+      if (isRecoverableTarWarning(tarResult.code, tarResult.stderr, filesArchivePath)) {
+        warnings.push(tarWarning);
+      } else if (tarResult.code !== 0) {
         throw new Error(tarResult.stderr || "Failed to archive site files");
       }
 
@@ -155,13 +173,16 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
       dbDumpPath: fs.existsSync(dbDumpPath) ? dbDumpPath : null,
       filesArchivePath: fs.existsSync(filesArchivePath) ? filesArchivePath : null,
       dbBytes: getFileSize(dbDumpPath),
-      filesBytes: getFileSize(filesArchivePath)
+      filesBytes: getFileSize(filesArchivePath),
+      warnings
     };
 
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 
     const totalBytes = BigInt(getFileSize(dbDumpPath) + getFileSize(filesArchivePath));
     const completedAt = new Date();
+    const warningMessage =
+      warnings.length > 0 ? `Backup completed with warnings: ${warnings.join(" | ")}` : null;
 
     await updateJob(job.id, {
       status: "completed",
@@ -171,7 +192,9 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
       dbDumpPath: fs.existsSync(dbDumpPath) ? dbDumpPath : null,
       filesArchivePath: fs.existsSync(filesArchivePath) ? filesArchivePath : null,
       manifestPath,
-      progressStep: "complete"
+      progressStep: "complete",
+      logExcerpt: warningMessage,
+      errorMessage: null
     });
 
     await prisma.site.update({
@@ -179,15 +202,23 @@ export async function runBackup(siteId: string, triggerSource = "manual") {
       data: {
         lastBackupAt: completedAt,
         lastBackupStatus: "completed",
-        lastBackupMessage: "Backup completed successfully"
+        lastBackupMessage: warningMessage ?? "Backup completed successfully"
       }
     });
 
     await enforceRetention(site.id);
-    await logActivity("backup", `Backup completed for ${site.name}`, "info", {
-      siteId: site.id,
-      storageBytes: getDirectoryUsage(siteDestination)
-    });
+    await logActivity(
+      "backup",
+      warnings.length > 0
+        ? `Backup completed with warnings for ${site.name}`
+        : `Backup completed for ${site.name}`,
+      warnings.length > 0 ? "warn" : "info",
+      {
+        siteId: site.id,
+        storageBytes: getDirectoryUsage(siteDestination),
+        warnings
+      }
+    );
   } catch (error) {
     await failJob(site, job.id, error);
     throw error;
