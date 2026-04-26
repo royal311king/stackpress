@@ -11,6 +11,7 @@ model Site {
   id                     String       @id @default(cuid())
   name                   String
   slug                   String       @unique
+  siteUrl                String?
   siteDirectory          String
   backupDestination      String
   dbContainerName        String
@@ -33,6 +34,11 @@ model Site {
   lastBackupAt           DateTime?
   lastBackupStatus       String?
   lastBackupMessage      String?
+  healthStatus           String       @default("unknown")
+  healthStatusCode       Int?
+  healthResponseTimeMs   Int?
+  healthCheckedAt        DateTime?
+  healthError            String?
   createdAt              DateTime     @default(now())
   updatedAt              DateTime     @updatedAt
   backups                BackupJob[]

@@ -3,6 +3,7 @@ import { z, ZodError } from "zod";
 export const siteSchema = z.object({
   name: z.string().min(1),
   slug: z.string().min(1),
+  siteUrl: z.preprocess((value) => value === "" ? null : value, z.string().optional().nullable()),
   siteDirectory: z.string().min(1),
   backupDestination: z.string().min(1),
   dbContainerName: z.string().min(1),
@@ -35,6 +36,7 @@ export const settingsSchema = z.object({
 const siteFieldLabels: Record<string, string> = {
   name: "Site Name",
   slug: "Site Slug",
+  siteUrl: "Site URL",
   siteDirectory: "Site Directory",
   backupDestination: "Backup Destination",
   dbContainerName: "DB Container",

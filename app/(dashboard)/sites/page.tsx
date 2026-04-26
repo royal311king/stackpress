@@ -1,7 +1,10 @@
+import Link from "next/link";
+
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/cards";
 import { SiteForm } from "@/components/forms";
 import { StatusBadge } from "@/components/status-badge";
+import { getWpAdminUrl, normalizeSiteUrl } from "@/lib/site-url";
 import { formatRelative, formatTimestamp } from "@/lib/utils";
 import { formatScheduleTime, getNextRunForSite, getScheduleLabel, isScheduleActive, isValidSchedule } from "@/lib/services/scheduler";
 
@@ -26,6 +29,8 @@ export default async function SitesPage() {
 
       return {
         ...site,
+        siteHref: normalizeSiteUrl(site.siteUrl),
+        wpAdminHref: getWpAdminUrl(site.siteUrl),
         nextRun,
         nextRunLabel: formatScheduleTime(nextRun, site.timezone),
         scheduleLabel: getScheduleLabel(site),
@@ -46,18 +51,19 @@ export default async function SitesPage() {
         <SectionCard title="Configured Sites" description="Each site stores paths, Docker names, credentials, notes, and schedule state.">
           <div className="space-y-3">
             {scheduleData.map((site) => (
-              <a
+              <div
                 key={site.id}
-                href={`/sites/${site.id}`}
-                className="block rounded-2xl border border-white/10 bg-white/5 p-4 transition hover:bg-white/[0.08]"
+                className="rounded-2xl border border-white/10 bg-white/5 p-4 transition hover:bg-white/[0.08]"
               >
                 <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <p className="text-lg font-medium">{site.name}</p>
-                    <p className="mt-1 text-sm text-slate-400">{site.siteDirectory}</p>
-                    <p className="mt-2 text-sm text-slate-500">
-                      Last backup {formatRelative(site.lastBackupAt)} • Destination {site.backupDestination}
-                    </p>
+                  <div className="min-w-0 flex-1">
+                    <Link href={`/sites/${site.id}`} className="block">
+                      <p className="text-lg font-medium">{site.name}</p>
+                      <p className="mt-1 break-all text-sm text-slate-400">{site.siteDirectory}</p>
+                      <p className="mt-2 break-all text-sm text-slate-500">
+                        Last backup {formatRelative(site.lastBackupAt)} • Destination {site.backupDestination}
+                      </p>
+                    </Link>
                     <div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-400">
                       <span>Schedule: {site.scheduleLabel}</span>
                       <span>Next run: {site.nextRunLabel}</span>
@@ -65,14 +71,30 @@ export default async function SitesPage() {
                         Last scheduled run: {site.lastScheduledBackup ? formatTimestamp(site.lastScheduledBackup.startedAt ?? site.lastScheduledBackup.createdAt) : "Never"}
                       </span>
                     </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Link className="btn btn-secondary" href={`/sites/${site.id}`}>
+                        Manage
+                      </Link>
+                      {site.siteHref ? (
+                        <a className="btn btn-secondary" href={site.siteHref} target="_blank" rel="noreferrer">
+                          Open Site
+                        </a>
+                      ) : null}
+                      {site.wpAdminHref ? (
+                        <a className="btn btn-secondary" href={site.wpAdminHref} target="_blank" rel="noreferrer">
+                          Open WP Admin
+                        </a>
+                      ) : null}
+                    </div>
                   </div>
                   <div className="flex flex-col items-end gap-2">
                     <StatusBadge value={site.active ? "active" : "inactive"} />
+                    <StatusBadge value={site.healthStatus} />
                     <StatusBadge value={site.scheduleState} />
                     <StatusBadge value={site.lastScheduledBackup?.status ?? (site.scheduleState === "disabled" ? "manual" : "queued")} />
                   </div>
                 </div>
-              </a>
+              </div>
             ))}
           </div>
         </SectionCard>

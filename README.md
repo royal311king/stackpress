@@ -67,7 +67,7 @@ server.ts
 
 ## Features in This MVP
 
-- Add and edit sites manually.
+- Add and edit sites manually, including a public Site URL for quick access and health checks.
 - Auto-detect common Docker settings from `docker-compose.yml` and `.env` files.
 - Run on-demand backups.
 - Run a sequential bulk backup for all active configured sites from the dashboard.
@@ -79,6 +79,19 @@ server.ts
 - Configure per-site retention and schedule settings.
 - Run scheduled backups with an in-process scheduler.
 - Store logs locally and display them in the UI.
+- Open a site or WordPress admin directly from site cards and detail pages.
+- Run lightweight on-demand HTTP health checks with status code, response time, and last checked time.
+
+
+### Site access and health checks
+
+Each site can store an optional `Site URL`. StackPress uses it for:
+
+- `Open Site` links
+- `Open WP Admin` links using `<siteUrl>/wp-admin`
+- manual `Check Now` HTTP health checks
+
+Health checks are intentionally lightweight. They run only when requested, store the latest result on the site record, and report `online`, `down`, or `unknown` with HTTP status, response time, timestamp, and error text when available. Secure one-click WordPress login is intentionally deferred and should be handled later through a StackPress WordPress companion plugin.
 
 ### Scheduled backup behavior
 
@@ -121,6 +134,17 @@ npx prisma generate
 npx prisma db push
 npm run dev
 ```
+
+### Database migration after pulling updates
+
+When Prisma schema fields change, update the local SQLite database with:
+
+```bash
+npx prisma generate
+npx prisma db push
+```
+
+Docker starts also run `prisma db push --skip-generate` from the entrypoint so existing mounted databases receive additive schema updates.
 
 Open [http://localhost:3000](http://localhost:3000).
 

@@ -60,6 +60,7 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
   const [values, setValues] = useState<Record<string, string>>({
     name: String(site?.name ?? ""),
     slug: String(site?.slug ?? ""),
+    siteUrl: String(site?.siteUrl ?? ""),
     siteDirectory: String(site?.siteDirectory ?? ""),
     backupDestination: String(site?.backupDestination ?? ""),
     dbContainerName: String(site?.dbContainerName ?? ""),
@@ -142,6 +143,7 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
     const payload = {
       name: formData.get("name"),
       slug: formData.get("slug"),
+      siteUrl: formData.get("siteUrl"),
       siteDirectory: formData.get("siteDirectory"),
       backupDestination: formData.get("backupDestination"),
       dbContainerName: formData.get("dbContainerName"),
@@ -228,6 +230,19 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
               placeholder="my-wordpress-site"
             />
             {renderFieldError("slug")}
+          </label>
+          <label className="block lg:col-span-2">
+            <span className="mb-2 block text-sm font-medium text-slate-200">Site URL</span>
+            <input
+              className={getFieldClassName("siteUrl", "input")}
+              name="siteUrl"
+              value={values.siteUrl}
+              onChange={(e) => updateField("siteUrl", e.target.value)}
+              placeholder="https://example.local"
+              spellCheck={false}
+            />
+            <p className="mt-2 text-xs text-slate-500">Used for Open Site, WP Admin, and manual health checks.</p>
+            {renderFieldError("siteUrl")}
           </label>
           <label className="block lg:col-span-2">
             <span className="mb-2 block text-sm font-medium text-slate-200">Notes</span>
@@ -430,15 +445,15 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
         </div>
       ) : null}
 
-      <div className="flex flex-col gap-3 border-t border-white/10 pt-2 sm:flex-row sm:items-center sm:justify-between">
+      <div className="border-t border-white/10 pt-2">
         <p className="text-sm text-slate-400">
           Review the detected paths and container names before saving. You can adjust any field manually.
         </p>
-        <div className="flex flex-wrap gap-3">
-          <button type="submit" className="btn btn-primary min-w-36" disabled={pending}>
+        <div className="mt-4 grid gap-3 md:grid-cols-2">
+          <button type="submit" className="btn btn-primary w-full min-h-12" disabled={pending}>
             {pending ? "Saving..." : "Save Site"}
           </button>
-          <button type="button" className="btn btn-secondary min-w-28" onClick={() => router.push("/sites")}>
+          <button type="button" className="btn btn-secondary w-full min-h-12" onClick={() => router.push("/sites")}>
             Cancel
           </button>
         </div>
