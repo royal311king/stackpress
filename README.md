@@ -93,6 +93,31 @@ Each site can store an optional `Site URL`. StackPress uses it for:
 
 Health checks are intentionally lightweight. They run only when requested, store the latest result on the site record, and report `online`, `down`, or `unknown` with HTTP status, response time, timestamp, and error text when available. Secure one-click WordPress login is intentionally deferred and should be handled later through a StackPress WordPress companion plugin.
 
+### Site setup path handling
+
+StackPress validates paths from the app/runtime point of view. When running in Docker, use the container-mounted path, not the macOS Finder path. For example, if your compose file mounts `/Users/mim1/docker/m1-wp-homelab` as `/mnt/wp-sites`, enter `/mnt/wp-sites/<site-name>` in StackPress.
+
+The Add/Edit Site form includes:
+
+- server-visible Browse buttons for Site Directory, Backup Destination, and Uploads Path
+- an Auto-Detect docker-compose flow that lets you select a visible `docker-compose.yml` file
+- a Container Path Helper showing mounts StackPress can see
+- Test Backup Paths checks for readable site/uploads folders, writable backup destination, Docker containers, and DB credentials
+- Create Folder support when the backup destination does not exist
+
+Detection no longer treats homelab defaults as proven facts. If StackPress falls back to values like `wpdb`, `wpuser`, or `wppass123`, the form marks them as fallback guesses and asks you to confirm them before saving.
+
+Backups are standardized under:
+
+```text
+<backup-destination>/<site-slug>/stackpress/
+  db-YYYY-MM-DD_HH-mm-ss.sql
+  files-YYYY-MM-DD_HH-mm-ss.tar.gz
+  manifest-YYYY-MM-DD_HH-mm-ss.json
+```
+
+Legacy duplicate folders are not deleted automatically. Retention cleanup applies to StackPress-tracked backups in the standardized folder.
+
 ### Scheduled backup behavior
 
 - Sites set to `Manual` are never scheduled.

@@ -1,23 +1,25 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 import { prisma } from "@/lib/prisma";
 import { detectSiteFromCompose } from "@/lib/services/detection";
 
-export async function POST(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     const body = await request.json().catch(() => ({}));
     const site = await prisma.site.findUnique({ where: { id } });
-
     const siteDirectory = body.siteDirectory ?? site?.siteDirectory;
-    if (!siteDirectory) {
+    if (!siteDirectory && !body.composePath) {
       return NextResponse.json({ error: "Site directory is required" }, { status: 400 });
     }
 
-    const result = await detectSiteFromCompose(siteDirectory);
+    const result = await detectSiteFromCompose({
+      siteDirectory,
+      composePath: body.composePath
+    });
 
     if (!result) {
-      return NextResponse.json({ error: "docker-compose.yml was not found for that site path" }, { status: 404 });
+      return NextResponse.json({ error: "docker-compose.yml was not found for that selected path" }, { status: 404 });
     }
 
     return NextResponse.json(result);

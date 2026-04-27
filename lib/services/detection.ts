@@ -2,12 +2,14 @@ import fs from "node:fs";
 import path from "node:path";
 import yaml from "js-yaml";
 
+type ComposeVolume = string | { source?: string; target?: string; type?: string };
+
 type ComposeService = {
   container_name?: string;
   image?: string;
   environment?: Record<string, unknown> | string[];
   env_file?: string | string[];
-  volumes?: Array<string | { source?: string; target?: string }>;
+  volumes?: ComposeVolume[];
 };
 
 type ComposeFile = {
@@ -20,18 +22,40 @@ type ServiceCandidate = {
   environment: Record<string, string>;
 };
 
+export type DetectedVolumeMount = {
+  service: string;
+  source: string;
+  target: string;
+  type: "bind" | "volume" | "unknown";
+};
+
+export type DetectionFallbackGuess = {
+  field: string;
+  value: string;
+  reason: string;
+};
+
 export type DetectionResult = {
   siteName: string;
   slug: string;
   siteDirectory: string;
+  composePath: string;
   wordpressContainerName: string;
   dbContainerName: string;
   dbName: string;
   dbUser: string;
   dbPassword: string;
   uploadsPath: string;
+  suggestedBackupDestination: string | null;
+  volumeMounts: DetectedVolumeMount[];
+  fallbackGuesses: DetectionFallbackGuess[];
   warnings: string[];
   detectedFields: string[];
+};
+
+type DetectionInput = string | {
+  siteDirectory?: string;
+  composePath?: string;
 };
 
 function slugify(value: string) {
@@ -66,7 +90,7 @@ function readEnvFile(envPath: string) {
 
     const [rawKey, ...rawValue] = trimmed.split("=");
     const key = rawKey.trim();
-    const value = rawValue.join("=").trim().replace(/^['"]|['"]$/g, "");
+    const value = rawValue.join("=").trim().replace(/^[']|[']$/g, "").replace(/^[\"]|[\"]$/g, "");
     if (key) {
       values[key] = value;
     }
@@ -124,6 +148,42 @@ function normalizeEnvironment(service: ComposeService, siteDirectory: string, ba
   return environment;
 }
 
+function parseVolumeMount(serviceName: string, siteDirectory: string, volume: ComposeVolume): DetectedVolumeMount | null {
+  if (typeof volume === "string") {
+    const parts = volume.split(":");
+    if (parts.length < 2) {
+      return null;
+    }
+
+    const source = parts[0] ?? "";
+    const target = parts[1] ?? "";
+    if (!target) {
+      return null;
+    }
+
+    const resolvedSource = source.startsWith(".") ? path.resolve(siteDirectory, source) : source;
+    return {
+      service: serviceName,
+      source: resolvedSource,
+      target,
+      type: path.isAbsolute(resolvedSource) ? "bind" : "volume"
+    };
+  }
+
+  if (!volume.target) {
+    return null;
+  }
+
+  const rawSource = volume.source ?? "";
+  const source = rawSource.startsWith(".") ? path.resolve(siteDirectory, rawSource) : rawSource;
+  return {
+    service: serviceName,
+    source,
+    target: volume.target,
+    type: volume.type === "bind" || path.isAbsolute(source) ? "bind" : volume.type === "volume" ? "volume" : "unknown"
+  };
+}
+
 function getVolumeTargets(service: ComposeService) {
   return (service.volumes ?? []).map((volume) => {
     if (typeof volume === "string") {
@@ -168,13 +228,52 @@ function scoreDbService(candidate: ServiceCandidate) {
 }
 
 function detectUploadsPath(siteDirectory: string) {
-  const standardUploads = path.join(siteDirectory, "html", "wp-content", "uploads");
-  return standardUploads;
+  return path.join(siteDirectory, "html", "wp-content", "uploads");
 }
 
-export async function detectSiteFromCompose(siteDirectory: string): Promise<DetectionResult | null> {
-  const composePath = path.join(siteDirectory, "docker-compose.yml");
-  if (!fs.existsSync(composePath)) {
+function resolveDetectionPaths(input: DetectionInput) {
+  if (typeof input === "string") {
+    return {
+      siteDirectory: input,
+      composePath: path.join(input, "docker-compose.yml")
+    };
+  }
+
+  if (input.composePath) {
+    return {
+      siteDirectory: input.siteDirectory || path.dirname(input.composePath),
+      composePath: input.composePath
+    };
+  }
+
+  const siteDirectory = input.siteDirectory || "";
+  return {
+    siteDirectory,
+    composePath: path.join(siteDirectory, "docker-compose.yml")
+  };
+}
+
+function getSuggestedBackupDestination(slug: string) {
+  const configuredRoot = process.env.STACKPRESS_BACKUP_ROOT || process.env.STACKPRESS_STORAGE_ROOT;
+  if (configuredRoot) {
+    return path.join(configuredRoot, slug);
+  }
+
+  if (fs.existsSync("/mnt/wp-backups")) {
+    return path.join("/mnt/wp-backups", slug);
+  }
+
+  return null;
+}
+
+function pushFallback(fallbacks: DetectionFallbackGuess[], warnings: string[], field: string, value: string, reason: string) {
+  fallbacks.push({ field, value, reason });
+  warnings.push(`${reason} StackPress used ${value} as a fallback guess.`);
+}
+
+export async function detectSiteFromCompose(input: DetectionInput): Promise<DetectionResult | null> {
+  const { siteDirectory, composePath } = resolveDetectionPaths(input);
+  if (!siteDirectory || !fs.existsSync(composePath)) {
     return null;
   }
 
@@ -192,6 +291,12 @@ export async function detectSiteFromCompose(siteDirectory: string): Promise<Dete
     environment: normalizeEnvironment(config, siteDirectory, baseEnv)
   }));
 
+  const volumeMounts = serviceCandidates.flatMap((candidate) => {
+    return (candidate.config.volumes ?? [])
+      .map((volume) => parseVolumeMount(candidate.name, siteDirectory, volume))
+      .filter((mount): mount is DetectedVolumeMount => Boolean(mount));
+  });
+
   const wordpressEntry =
     [...serviceCandidates].sort((a, b) => scoreWordPressService(b) - scoreWordPressService(a))[0] ?? null;
   const dbEntry =
@@ -199,41 +304,43 @@ export async function detectSiteFromCompose(siteDirectory: string): Promise<Dete
 
   const slug = slugify(path.basename(siteDirectory));
   const warnings: string[] = [];
+  const fallbackGuesses: DetectionFallbackGuess[] = [];
   const detectedFields = ["siteDirectory", "slug", "uploadsPath"];
 
   const wordpressContainerName = wordpressEntry?.config.container_name ?? `wp-${slug}`;
   if (wordpressEntry?.config.container_name) {
     detectedFields.push("wordpressContainerName");
   } else {
-    warnings.push(`WordPress container name was not found in docker-compose.yml, so StackPress used ${wordpressContainerName}.`);
+    pushFallback(fallbackGuesses, warnings, "wordpressContainerName", wordpressContainerName, "WordPress container name was not found in docker-compose.yml.");
   }
 
   const dbContainerName = dbEntry?.config.container_name ?? `wpdb-${slug}`;
   if (dbEntry?.config.container_name) {
     detectedFields.push("dbContainerName");
   } else {
-    warnings.push(`Database container name was not found in docker-compose.yml, so StackPress used ${dbContainerName}.`);
+    pushFallback(fallbackGuesses, warnings, "dbContainerName", dbContainerName, "Database container name was not found in docker-compose.yml.");
   }
 
   const dbName = dbEntry?.environment.MYSQL_DATABASE ?? dbEntry?.environment.MARIADB_DATABASE ?? dbEntry?.environment.WORDPRESS_DB_NAME ?? "wpdb";
   if (dbEntry?.environment.MYSQL_DATABASE || dbEntry?.environment.MARIADB_DATABASE || dbEntry?.environment.WORDPRESS_DB_NAME) {
     detectedFields.push("dbName");
   } else {
-    warnings.push(`Database name was not found in compose environment, so StackPress used ${dbName}.`);
+    pushFallback(fallbackGuesses, warnings, "dbName", dbName, "Database name was not found in compose environment.");
   }
 
   const dbUser = dbEntry?.environment.MYSQL_USER ?? dbEntry?.environment.MARIADB_USER ?? wordpressEntry?.environment.WORDPRESS_DB_USER ?? "wpuser";
   if (dbEntry?.environment.MYSQL_USER || dbEntry?.environment.MARIADB_USER || wordpressEntry?.environment.WORDPRESS_DB_USER) {
     detectedFields.push("dbUser");
   } else {
-    warnings.push(`Database user was not found in compose environment, so StackPress used ${dbUser}.`);
+    pushFallback(fallbackGuesses, warnings, "dbUser", dbUser, "Database user was not found in compose environment.");
   }
 
   const dbPassword = dbEntry?.environment.MYSQL_PASSWORD ?? dbEntry?.environment.MARIADB_PASSWORD ?? wordpressEntry?.environment.WORDPRESS_DB_PASSWORD ?? "wppass123";
   if (dbEntry?.environment.MYSQL_PASSWORD || dbEntry?.environment.MARIADB_PASSWORD || wordpressEntry?.environment.WORDPRESS_DB_PASSWORD) {
     detectedFields.push("dbPassword");
   } else {
-    warnings.push("Database password was not found in compose environment, so StackPress used the homelab default.");
+    fallbackGuesses.push({ field: "dbPassword", value: "wppass123", reason: "Database password was not found in compose environment." });
+    warnings.push("Database password was not found in compose environment. StackPress used the homelab default as a fallback guess.");
   }
 
   if (!wordpressEntry) {
@@ -253,12 +360,16 @@ export async function detectSiteFromCompose(siteDirectory: string): Promise<Dete
     siteName: titleizeSlug(slug),
     slug,
     siteDirectory,
+    composePath,
     wordpressContainerName,
     dbContainerName,
     dbName,
     dbUser,
     dbPassword,
     uploadsPath,
+    suggestedBackupDestination: getSuggestedBackupDestination(slug),
+    volumeMounts,
+    fallbackGuesses,
     warnings,
     detectedFields
   };

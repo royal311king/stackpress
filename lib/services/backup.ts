@@ -80,6 +80,10 @@ export function getSiteRootDirectory(site: Pick<Site, "backupDestination" | "slu
   const normalizedDestination = path.resolve(site.backupDestination);
   const destinationName = path.basename(normalizedDestination);
 
+  if (destinationName === "stackpress") {
+    return path.dirname(normalizedDestination);
+  }
+
   return destinationName === site.slug
     ? normalizedDestination
     : path.join(normalizedDestination, site.slug);
