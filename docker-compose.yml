@@ -15,5 +15,7 @@ services:
       - ./data:/app/data
       - ./storage:/app/storage
       - ./logs:/app/logs
+      - /Users/m1-homelab-apps/docker/wp/sites:/mnt/wp-sites
+      - /Volumes/M1-HL-BAKUP/--- LOCAL WEBSITE BACKUPS ---:/mnt/wp-backups
       - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped

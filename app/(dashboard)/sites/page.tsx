@@ -3,6 +3,7 @@ import Link from "next/link";
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/cards";
 import { SiteForm } from "@/components/forms";
+import { SiteAutoDetectButton } from "@/components/site-auto-detect";
 import { StatusBadge } from "@/components/status-badge";
 import { getWpAdminUrl, normalizeSiteUrl } from "@/lib/site-url";
 import { formatRelative, formatTimestamp } from "@/lib/utils";
@@ -45,6 +46,7 @@ export default async function SitesPage() {
       <PageHeader
         title="Sites"
         subtitle="Register Docker-based WordPress sites, detect container settings, and configure site-specific retention and schedules."
+        actions={<SiteAutoDetectButton />}
       />
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr_0.85fr]">
