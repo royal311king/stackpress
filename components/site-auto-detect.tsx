@@ -36,7 +36,7 @@ function updateSiteField(sites: DetectedSite[], index: number, field: keyof Dete
   });
 }
 
-export function SiteAutoDetectButton() {
+export function SiteAutoDetectButton({ fullWidth = false }: { fullWidth?: boolean } = {}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [scanning, setScanning] = useState(false);
@@ -105,7 +105,7 @@ export function SiteAutoDetectButton() {
 
   return (
     <>
-      <button type="button" className="btn btn-primary" onClick={scanSites}>
+      <button type="button" className={`btn btn-primary ${fullWidth ? "w-full" : ""}`} onClick={scanSites}>
         Auto-Detect Sites
       </button>
 
@@ -143,11 +143,14 @@ export function SiteAutoDetectButton() {
                   <thead>
                     <tr>
                       <th>Import</th>
-                      <th>Site</th>
-                      <th>Paths</th>
-                      <th>Containers</th>
-                      <th>Database</th>
-                      <th>URL / Cloudflare</th>
+                      <th>Site Slug</th>
+                      <th>Site Directory</th>
+                      <th>WP Container</th>
+                      <th>DB Container</th>
+                      <th>DB Name / User</th>
+                      <th>DB Password Status</th>
+                      <th>Uploads Path</th>
+                      <th>Backup Destination</th>
                       <th>Status</th>
                     </tr>
                   </thead>
@@ -170,27 +173,35 @@ export function SiteAutoDetectButton() {
                             {site.existingSiteId ? <p className="mt-2 text-xs text-amber-200">Already configured</p> : null}
                           </td>
                           <td className="min-w-80 align-top text-xs">
-                            <p className="break-all font-mono text-slate-300">Site: {site.siteDirectory}</p>
-                            <p className="mt-2 break-all font-mono text-slate-300">Uploads: {site.uploadsPath}</p>
-                            <p className="mt-2 break-all font-mono text-slate-300">Backup: {site.backupDestination}</p>
+                            <p className="break-all font-mono text-slate-300">{site.siteDirectory}</p>
                           </td>
                           <td className="min-w-56 align-top text-xs">
-                            <p className="break-all font-mono text-slate-300">WP: {site.wordpressContainerName}</p>
-                            <p className="mt-2 break-all font-mono text-slate-300">DB: {site.dbContainerName}</p>
+                            <p className="break-all font-mono text-slate-300">{site.wordpressContainerName}</p>
                             <p className="mt-2 text-slate-400">Port: {site.mappedHostPort ?? "-"}</p>
                           </td>
-                          <td className="min-w-64 align-top">
+                          <td className="min-w-56 align-top text-xs">
+                            <p className="break-all font-mono text-slate-300">{site.dbContainerName}</p>
+                          </td>
+                          <td className="min-w-56 align-top">
                             <div className="space-y-2">
                               <input className="input" value={site.dbName} onChange={(event) => setSites((current) => updateSiteField(current, index, "dbName", event.target.value))} placeholder="DB name" />
                               <input className="input" value={site.dbUser} onChange={(event) => setSites((current) => updateSiteField(current, index, "dbUser", event.target.value))} placeholder="DB user" />
-                              <input className={`input ${needsPassword ? "border-amber-400/45" : ""}`} value={site.dbPassword} onChange={(event) => setSites((current) => updateSiteField(current, index, "dbPassword", event.target.value))} placeholder="DB password" />
-                              {needsPassword ? <p className="text-xs text-amber-200">Needs review: DB password not detected.</p> : null}
                             </div>
                           </td>
-                          <td className="min-w-72 align-top">
-                            <div className="space-y-2">
-                              <input className="input" value={site.publicUrl || site.siteUrl} onChange={(event) => setSites((current) => updateSiteField(current, index, "publicUrl", event.target.value))} placeholder="Public URL or local URL" />
-                              <input className="input" value={site.cloudflareServiceTarget} onChange={(event) => setSites((current) => updateSiteField(current, index, "cloudflareServiceTarget", event.target.value))} placeholder="Cloudflare service target optional" />
+                          <td className="min-w-60 align-top">
+                            <input className={`input ${needsPassword ? "border-amber-400/45" : ""}`} value={site.dbPassword} onChange={(event) => setSites((current) => updateSiteField(current, index, "dbPassword", event.target.value))} placeholder="DB password" />
+                            <p className={`mt-2 text-xs ${needsPassword ? "text-amber-200" : "text-emerald-200"}`}>
+                              {needsPassword ? "Needs review" : "Detected"}
+                            </p>
+                          </td>
+                          <td className="min-w-80 align-top text-xs">
+                            <p className="break-all font-mono text-slate-300">{site.uploadsPath}</p>
+                          </td>
+                          <td className="min-w-80 align-top text-xs">
+                            <p className="break-all font-mono text-slate-300">{site.backupDestination}</p>
+                            <div className="mt-3 space-y-2">
+                              <input className="input" value={site.publicUrl || site.siteUrl} onChange={(event) => setSites((current) => updateSiteField(current, index, "publicUrl", event.target.value))} placeholder="Public URL optional" />
+                              <input className="input" value={site.cloudflareServiceTarget} onChange={(event) => setSites((current) => updateSiteField(current, index, "cloudflareServiceTarget", event.target.value))} placeholder="Cloudflare target optional" />
                             </div>
                           </td>
                           <td className="min-w-52 align-top text-sm">

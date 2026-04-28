@@ -102,6 +102,13 @@ export default async function SitesPage() {
         </SectionCard>
 
         <SectionCard title="Add Site" description="Use auto-detection when your site follows the typical homelab folder and container naming pattern.">
+          <div className="mb-5 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 p-4">
+            <p className="text-sm font-medium text-emerald-100">Auto-detect Docker WordPress sites</p>
+            <p className="mt-2 text-sm text-emerald-50/80">Scan /mnt/wp-sites, review detected docker-compose.yml stacks, then import selected sites into StackPress.</p>
+            <div className="mt-4">
+              <SiteAutoDetectButton fullWidth />
+            </div>
+          </div>
           <SiteForm detectEndpoint="/api/sites/detect" submitEndpoint="/api/sites" method="POST" />
         </SectionCard>
       </div>
