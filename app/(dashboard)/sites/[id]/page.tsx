@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 
 import { AutoRefresh } from "@/components/auto-refresh";
 import { PageHeader, SectionCard } from "@/components/cards";
-import { ActionButton, DeleteBackupButton, RestoreBackupButton, SiteForm } from "@/components/forms";
+import { ActionButton, DeleteBackupButton, DeleteSiteButton, RestoreBackupButton, SiteForm } from "@/components/forms";
 import { StatusBadge } from "@/components/status-badge";
 import { prisma } from "@/lib/prisma";
 import { getWpAdminUrl, normalizeSiteUrl } from "@/lib/site-url";
@@ -77,6 +77,7 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
               filesArchivePath={latestRestorableBackup?.filesArchivePath}
               detailMessage={latestRestorableBackup ? latestRestorableBackup.logExcerpt ?? latestRestorableBackup.errorMessage ?? null : "StackPress will restore the latest successful backup for this site."}
             />
+            <DeleteSiteButton endpoint={`/api/sites/${site.id}`} siteName={site.name} />
           </>
         }
       />

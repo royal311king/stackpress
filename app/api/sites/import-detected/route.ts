@@ -22,6 +22,7 @@ export async function POST(request: Request) {
 
       if (existing && !overwriteExisting) {
         skipped += 1;
+        errors.push({ slug, error: "Already imported." });
         continue;
       }
 

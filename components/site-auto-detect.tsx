@@ -130,7 +130,7 @@ export function SiteAutoDetectButton({ fullWidth = false }: { fullWidth?: boolea
               <button type="button" className="btn btn-secondary" onClick={scanSites} disabled={scanning}>{scanning ? "Scanning..." : "Scan Again"}</button>
               <label className="flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-slate-200">
                 <input type="checkbox" checked={overwriteExisting} onChange={(event) => setOverwriteExisting(event.target.checked)} />
-                Overwrite existing matching sites
+                Update existing matching sites
               </label>
               <button type="button" className="btn btn-primary" onClick={importSelected} disabled={pending || scanning}>{pending ? "Importing..." : `Import Selected (${selectedSites().length})`}</button>
             </div>
@@ -157,6 +157,8 @@ export function SiteAutoDetectButton({ fullWidth = false }: { fullWidth?: boolea
                   <tbody>
                     {sites.map((site, index) => {
                       const needsPassword = site.needsReview.includes("dbPassword");
+                      const alreadyImported = Boolean(site.existingSiteId);
+                      const importDisabled = needsPassword || (alreadyImported && !overwriteExisting);
                       return (
                         <tr key={site.slug}>
                           <td>
@@ -164,13 +166,13 @@ export function SiteAutoDetectButton({ fullWidth = false }: { fullWidth?: boolea
                               type="checkbox"
                               checked={Boolean(selected[site.slug])}
                               onChange={(event) => setSelected((current) => ({ ...current, [site.slug]: event.target.checked }))}
-                              disabled={needsPassword}
+                              disabled={importDisabled}
                             />
                           </td>
                           <td className="min-w-56 align-top">
                             <input className="input" value={site.name} onChange={(event) => setSites((current) => updateSiteField(current, index, "name", event.target.value))} />
                             <p className="mt-2 font-mono text-xs text-slate-500">{site.slug}</p>
-                            {site.existingSiteId ? <p className="mt-2 text-xs text-amber-200">Already configured</p> : null}
+                            {alreadyImported ? <p className="mt-2 text-xs text-amber-200">Already imported</p> : null}
                           </td>
                           <td className="min-w-80 align-top text-xs">
                             <p className="break-all font-mono text-slate-300">{site.siteDirectory}</p>
@@ -205,7 +207,7 @@ export function SiteAutoDetectButton({ fullWidth = false }: { fullWidth?: boolea
                             </div>
                           </td>
                           <td className="min-w-52 align-top text-sm">
-                            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs uppercase tracking-[0.16em] text-slate-200">{site.containerStatus}</span>
+                            <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-xs uppercase tracking-[0.16em] text-slate-200">{alreadyImported && !overwriteExisting ? "already imported" : site.containerStatus}</span>
                             {site.warnings.length > 0 ? <div className="mt-3 space-y-1 text-xs text-amber-200">{site.warnings.map((warning) => <p key={warning}>{warning}</p>)}</div> : null}
                           </td>
                         </tr>

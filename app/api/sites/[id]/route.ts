@@ -41,3 +41,29 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     );
   }
 }
+export async function DELETE(_request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id } = await params;
+    const site = await prisma.site.findUnique({ where: { id } });
+
+    if (!site) {
+      return NextResponse.json({ error: "Site not found" }, { status: 404 });
+    }
+
+    await prisma.site.delete({ where: { id } });
+    await logActivity("site", `Site removed from StackPress: ${site.name}`, "warn", {
+      siteId: site.id,
+      slug: site.slug,
+      filesDeleted: false,
+      containersDeleted: false,
+      backupFilesDeleted: false
+    });
+
+    return NextResponse.json({ ok: true, redirectTo: "/sites" });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : "Failed to delete site" },
+      { status: 400 }
+    );
+  }
+}

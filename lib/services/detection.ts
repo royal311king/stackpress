@@ -228,7 +228,13 @@ function scoreDbService(candidate: ServiceCandidate) {
 }
 
 function detectUploadsPath(siteDirectory: string) {
-  return path.join(siteDirectory, "html", "wp-content", "uploads");
+  const candidates = [
+    path.join(siteDirectory, "html", "wp-content", "uploads"),
+    path.join("/mnt/wp-sites", path.basename(siteDirectory), "html", "wp-content", "uploads"),
+    path.join(siteDirectory, "wp", "wp-content", "uploads")
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
 }
 
 function resolveDetectionPaths(input: DetectionInput) {

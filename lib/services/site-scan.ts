@@ -154,6 +154,17 @@ function getMappedHostPort(service?: ComposeService) {
   return null;
 }
 
+
+function detectUploadsPath(siteDirectory: string) {
+  const candidates = [
+    path.join(siteDirectory, "html", "wp-content", "uploads"),
+    path.join(DEFAULT_SITES_ROOT, path.basename(siteDirectory), "html", "wp-content", "uploads"),
+    path.join(siteDirectory, "wp", "wp-content", "uploads")
+  ];
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
+}
+
 function titleizeSlug(slug: string) {
   return slug.split("-").filter(Boolean).map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }
@@ -210,7 +221,7 @@ async function scanSiteFolder(siteDirectory: string, existingBySlug: Map<string,
     name: titleizeSlug(slug),
     slug,
     siteDirectory,
-    uploadsPath: path.join(siteDirectory, "html", "wp-content", "uploads"),
+    uploadsPath: detectUploadsPath(siteDirectory),
     backupDestination: path.join(DEFAULT_BACKUPS_ROOT, slug, "stackpress"),
     wordpressContainerName,
     dbContainerName,

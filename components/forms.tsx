@@ -706,6 +706,84 @@ export function ActionButton({ endpoint, label, variant = "secondary", confirmMe
   );
 }
 
+
+type DeleteSiteButtonProps = {
+  endpoint: string;
+  siteName: string;
+};
+
+export function DeleteSiteButton({ endpoint, siteName }: DeleteSiteButtonProps) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <>
+      <button className="btn btn-danger" type="button" onClick={() => setOpen(true)}>
+        Delete Site
+      </button>
+
+      {open ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/75 px-4 py-6">
+          <div className="panel w-full max-w-xl rounded-3xl p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-[0.22em] text-rose-300/80">Destructive App Action</p>
+                <h3 className="mt-2 text-2xl font-semibold">Remove this site from StackPress?</h3>
+                <p className="mt-2 text-sm text-slate-400">
+                  This removes {siteName} and its StackPress backup/history records from the app database.
+                </p>
+              </div>
+              <button className="btn btn-secondary" type="button" disabled={pending} onClick={() => setOpen(false)}>
+                Close
+              </button>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-amber-400/20 bg-amber-400/10 p-4 text-sm text-amber-100">
+              WordPress files, Docker containers, and backup files on disk will not be deleted.
+            </div>
+
+            {error ? (
+              <div className="mt-4 rounded-2xl border border-rose-400/25 bg-rose-400/10 p-4 text-sm text-rose-100">
+                {error}
+              </div>
+            ) : null}
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              <button
+                className="btn btn-danger"
+                type="button"
+                disabled={pending}
+                onClick={() => {
+                  setError(null);
+                  startTransition(async () => {
+                    const response = await fetch(endpoint, { method: "DELETE" });
+                    const data = await response.json().catch(() => ({}));
+                    if (!response.ok) {
+                      setError(data.error ?? "Delete failed");
+                      return;
+                    }
+
+                    setOpen(false);
+                    router.refresh();
+                    router.push(data.redirectTo ?? "/sites");
+                  });
+                }}
+              >
+                {pending ? "Removing..." : "Remove from StackPress"}
+              </button>
+              <button className="btn btn-secondary" type="button" disabled={pending} onClick={() => setOpen(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
 type RestoreBackupButtonProps = {
   endpoint: string;
   label?: string;

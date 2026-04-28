@@ -2,7 +2,7 @@ import Link from "next/link";
 
 import { prisma } from "@/lib/prisma";
 import { PageHeader, SectionCard } from "@/components/cards";
-import { SiteForm } from "@/components/forms";
+import { DeleteSiteButton, SiteForm } from "@/components/forms";
 import { SiteAutoDetectButton } from "@/components/site-auto-detect";
 import { StatusBadge } from "@/components/status-badge";
 import { getWpAdminUrl, normalizeSiteUrl } from "@/lib/site-url";
@@ -87,6 +87,7 @@ export default async function SitesPage() {
                           Open WP Admin
                         </a>
                       ) : null}
+                      <DeleteSiteButton endpoint={`/api/sites/${site.id}`} siteName={site.name} />
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-2">
