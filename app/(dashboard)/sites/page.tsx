@@ -8,8 +8,11 @@ import { StatusBadge } from "@/components/status-badge";
 import { getWpAdminUrl, normalizeSiteUrl } from "@/lib/site-url";
 import { formatRelative, formatTimestamp } from "@/lib/utils";
 import { formatScheduleTime, getNextRunForSite, getScheduleLabel, isScheduleActive, isValidSchedule } from "@/lib/services/scheduler";
+import { getAppSettings } from "@/lib/services/settings";
+import { resolveBackupFolder, resolveSiteDirectory } from "@/lib/services/paths";
 
 export default async function SitesPage() {
+  const settings = await getAppSettings();
   const sites = await prisma.site.findMany({
     include: {
       backups: {
@@ -30,6 +33,8 @@ export default async function SitesPage() {
 
       return {
         ...site,
+        resolvedSiteDirectory: resolveSiteDirectory(site, settings),
+        resolvedBackupFolder: resolveBackupFolder(site, settings),
         siteHref: normalizeSiteUrl(site.siteUrl),
         wpAdminHref: getWpAdminUrl(site.siteUrl),
         nextRun,
@@ -61,9 +66,9 @@ export default async function SitesPage() {
                   <div className="min-w-0 flex-1">
                     <Link href={`/sites/${site.id}`} className="block">
                       <p className="text-lg font-medium">{site.name}</p>
-                      <p className="mt-1 break-all text-sm text-slate-400">{site.siteDirectory}</p>
+                      <p className="mt-1 break-all text-sm text-slate-400">{site.resolvedSiteDirectory}</p>
                       <p className="mt-2 break-all text-sm text-slate-500">
-                        Last backup {formatRelative(site.lastBackupAt)} • Destination {site.backupDestination}
+                        Last backup {formatRelative(site.lastBackupAt)} • Destination {site.resolvedBackupFolder}
                       </p>
                     </Link>
                     <div className="mt-3 flex flex-wrap gap-3 text-sm text-slate-400">
@@ -110,7 +115,7 @@ export default async function SitesPage() {
               <SiteAutoDetectButton fullWidth />
             </div>
           </div>
-          <SiteForm detectEndpoint="/api/sites/detect" submitEndpoint="/api/sites" method="POST" />
+          <SiteForm detectEndpoint="/api/sites/detect" submitEndpoint="/api/sites" method="POST" roots={{ sitesRoot: settings.sitesRoot, backupRoot: settings.backupRoot }} />
         </SectionCard>
       </div>
     </div>

@@ -17,7 +17,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
 
     const site = await prisma.site.update({
       where: { id },
-      data: parsed
+      data: { ...parsed, siteDirectory: null, backupDestination: null }
     });
 
     await logActivity("site", `Site updated: ${site.name}`, "info", { siteId: site.id });

@@ -8,6 +8,7 @@ import { prisma } from "@/lib/prisma";
 import { runCommand } from "@/lib/shell";
 import { logActivity } from "@/lib/services/logging";
 import { getAppSettings } from "@/lib/services/settings";
+import { resolveSiteDirectory, resolveStackPressBackupDirectory } from "@/lib/services/paths";
 
 const BACKUP_SUCCESS_STATUS = "success" as const;
 const BACKUP_SUCCESS_WITH_WARNINGS_STATUS = "success_with_warnings" as const;
@@ -74,27 +75,6 @@ export function isRecoverableTarWarning(code: number, stderr: string, archivePat
 
   const normalized = normalizeWarningMessage(stderr).toLowerCase();
   return code === 1 && pathExists(archivePath) && normalized.includes("file changed as we read it");
-}
-
-export function getSiteRootDirectory(site: Pick<Site, "backupDestination" | "slug">) {
-  const normalizedDestination = path.resolve(site.backupDestination);
-  const destinationName = path.basename(normalizedDestination);
-
-  if (destinationName === "stackpress") {
-    return path.dirname(normalizedDestination);
-  }
-
-  return destinationName === site.slug
-    ? normalizedDestination
-    : path.join(normalizedDestination, site.slug);
-}
-
-export function getSiteBackupDirectory(site: Pick<Site, "backupDestination" | "slug">) {
-  return path.join(getSiteRootDirectory(site), "stackpress");
-}
-
-export function getPreRestoreSnapshotDirectory(site: Pick<Site, "backupDestination" | "slug">) {
-  return path.join(getSiteBackupDirectory(site), "pre-restore");
 }
 
 export function buildTarArgs(siteDirectory: string, filesArchivePath: string) {
@@ -192,15 +172,17 @@ export async function runBackup(siteId: string, triggerSource = "manual"): Promi
   });
 
   try {
-    if (!pathExists(site.siteDirectory)) {
+    const siteDirectory = resolveSiteDirectory(site, settings);
+    const backupFolder = path.dirname(resolveStackPressBackupDirectory(site, settings));
+    const siteDestination = resolveStackPressBackupDirectory(site, settings);
+
+    if (!pathExists(siteDirectory)) {
       throw new Error("Site directory does not exist");
     }
 
-    if (!pathExists(site.backupDestination)) {
-      throw new Error("Backup destination does not exist");
-    }
+    await fs.promises.mkdir(siteDestination, { recursive: true });
 
-    const diskCheck = await runCommand("df", ["-Pk", site.backupDestination]);
+    const diskCheck = await runCommand("df", ["-Pk", backupFolder]);
     if (diskCheck.code !== 0) {
       throw new Error(diskCheck.stderr || "Unable to determine free disk space");
     }
@@ -212,9 +194,6 @@ export async function runBackup(siteId: string, triggerSource = "manual"): Promi
         `Free disk space is below the configured threshold of ${settings.diskFreeThresholdGb} GB`
       );
     }
-
-    const siteDestination = getSiteBackupDirectory(site);
-    ensureDirectory(siteDestination);
 
     const stamp = format(startedAt, "yyyy-MM-dd_HH-mm-ss");
     const dbDumpPath = path.join(siteDestination, `db-${stamp}.sql`);
@@ -252,8 +231,8 @@ export async function runBackup(siteId: string, triggerSource = "manual"): Promi
     if (site.backupMode !== "database") {
       await updateJob(job.id, { progressStep: "archiving-files" });
 
-      const htmlPath = path.join(site.siteDirectory, "html");
-      const tarResult = await runCommand("tar", buildTarArgs(site.siteDirectory, filesArchivePath));
+      const htmlPath = path.join(siteDirectory, "html");
+      const tarResult = await runCommand("tar", buildTarArgs(siteDirectory, filesArchivePath));
       const tarWarning = normalizeWarningMessage(tarResult.stderr);
 
       if (isRecoverableTarWarning(tarResult.code, tarResult.stderr, filesArchivePath)) {

@@ -93,24 +93,24 @@ Each site can store an optional `Site URL`. StackPress uses it for:
 
 Health checks are intentionally lightweight. They run only when requested, store the latest result on the site record, and report `online`, `down`, or `unknown` with HTTP status, response time, timestamp, and error text when available. Secure one-click WordPress login is intentionally deferred and should be handled later through a StackPress WordPress companion plugin.
 
-### Site setup path handling
+### Root-based path handling
 
-StackPress validates paths from the app/runtime point of view. When running in Docker, use the container-mounted path, not the macOS Finder path. For example, if your compose file mounts `/Users/mim1/docker/m1-wp-homelab` as `/mnt/wp-sites`, enter `/mnt/wp-sites/<site-name>` in StackPress.
+StackPress stores two global, container-visible roots: **WordPress Sites Root** and **Backup Root**. A site's standard paths are derived as `<sites-root>/<site-slug>` and `<backup-root>/<site-slug>`. Moving all sites or backups therefore requires one settings change. Per-site custom folders remain available as explicit overrides.
 
 The Add/Edit Site form includes:
 
-- server-visible Browse buttons for Site Directory, Backup Destination, and Uploads Path
+- read-only previews of the resolved site and backup folders, with opt-in custom-folder controls
 - an Auto-Detect docker-compose flow that lets you select a visible `docker-compose.yml` file
 - a Container Path Helper showing mounts StackPress can see
 - Test Backup Paths checks for readable site/uploads folders, writable backup destination, Docker containers, and DB credentials
-- Create Folder support when the backup destination does not exist
+- Create Folder support for missing roots and backup folders
 
 Detection no longer treats homelab defaults as proven facts. If StackPress falls back to values like `wpdb`, `wpuser`, or `wppass123`, the form marks them as fallback guesses and asks you to confirm them before saving.
 
 Backups are standardized under:
 
 ```text
-<backup-destination>/<site-slug>/stackpress/
+<backup-root>/<site-slug>/stackpress/
   db-YYYY-MM-DD_HH-mm-ss.sql
   files-YYYY-MM-DD_HH-mm-ss.tar.gz
   manifest-YYYY-MM-DD_HH-mm-ss.json
@@ -134,7 +134,7 @@ File archives skip common volatile WordPress paths to reduce backup size and avo
 
 When enabled in the restore modal, StackPress creates a rollback snapshot in:
 
-- `<backup-destination>/<site-slug>/stackpress/pre-restore/`
+- `<backup-root>/<site-slug>/stackpress/pre-restore/`
 
 That snapshot includes:
 
@@ -185,7 +185,7 @@ Then open [http://localhost:3000](http://localhost:3000).
 
 ### Docker path visibility
 
-StackPress executes file operations against the paths stored on each site record. If you run StackPress in Docker, the container must be able to see those same host paths.
+StackPress resolves file operations from the global roots and each site's slug. If you run StackPress in Docker, the container must be able to see those root paths.
 
 Typical examples:
 
@@ -215,7 +215,7 @@ StackPress also ships with a Linux Docker CLI inside the image, which avoids rel
 - DB name: `wpdb`
 - DB user: `wpuser`
 - DB password: `wppass123`
-- Backup destination: `/Volumes/M1-HL-BAKUP/--- LOCAL WEBSITE BACKUPS ---/`
+- Backup Root: `/Volumes/M1-HL-BAKUP/--- LOCAL WEBSITE BACKUPS ---`
 
 ## Notes and Known MVP Limits
 

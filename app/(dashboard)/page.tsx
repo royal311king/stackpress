@@ -105,7 +105,7 @@ export default async function DashboardPage() {
                 <div className="flex items-center justify-between gap-4">
                   <div>
                     <p className="text-lg font-medium">{site.name}</p>
-                    <p className="text-sm text-slate-400">{site.siteDirectory}</p>
+                    <p className="text-sm text-slate-400">{site.resolvedSiteDirectory}</p>
                   </div>
                   <StatusBadge value={site.active ? "active" : "inactive"} />
                 </div>

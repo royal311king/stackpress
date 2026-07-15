@@ -7,12 +7,13 @@ import { prisma } from "@/lib/prisma";
 import { runCommand } from "@/lib/shell";
 import {
   buildTarArgs,
-  getPreRestoreSnapshotDirectory,
   isRecoverableTarWarning,
   normalizeWarningMessage,
   RESTORABLE_BACKUP_STATUSES
 } from "@/lib/services/backup";
 import { logActivity } from "@/lib/services/logging";
+import { getAppSettings } from "@/lib/services/settings";
+import { resolvePreRestoreDirectory, resolveSiteDirectory } from "@/lib/services/paths";
 
 export class SafetySnapshotRestoreError extends Error {
   constructor(message: string) {
@@ -60,8 +61,8 @@ type RestoreSite = {
   id: string;
   name: string;
   slug: string;
-  backupDestination: string;
-  siteDirectory: string;
+  customBackupDestination: string | null;
+  customSiteDirectory: string | null;
   wordpressContainerName: string;
   dbContainerName: string;
   dbUser: string;
@@ -86,7 +87,9 @@ async function logRestoreActivity(
 async function createSafetySnapshot(site: RestoreSite, backupId: string) {
   const startedAt = new Date();
   const stamp = format(startedAt, "yyyy-MM-dd_HH-mm-ss");
-  const snapshotDirectory = getPreRestoreSnapshotDirectory(site);
+  const settings = await getAppSettings();
+  const siteDirectory = resolveSiteDirectory(site, settings);
+  const snapshotDirectory = resolvePreRestoreDirectory(site, settings);
   ensureDirectory(snapshotDirectory);
 
   const dbDumpPath = path.join(snapshotDirectory, `pre-restore-db-${stamp}.sql`);
@@ -125,9 +128,9 @@ async function createSafetySnapshot(site: RestoreSite, backupId: string) {
     );
   }
 
-  const htmlPath = path.join(site.siteDirectory, "html");
+  const htmlPath = path.join(siteDirectory, "html");
   if (pathExists(htmlPath)) {
-    const tarResult = await runCommand("tar", buildTarArgs(site.siteDirectory, filesArchivePath));
+    const tarResult = await runCommand("tar", buildTarArgs(siteDirectory, filesArchivePath));
     const tarWarning = normalizeWarningMessage(tarResult.stderr);
 
     if (isRecoverableTarWarning(tarResult.code, tarResult.stderr, filesArchivePath)) {
@@ -176,6 +179,8 @@ export async function runRestore(siteId: string, backupId?: string, options: Res
   if (!site) {
     throw new Error("Site not found");
   }
+  const settings = await getAppSettings();
+  const siteDirectory = resolveSiteDirectory(site, settings);
 
   const backup =
     (backupId
@@ -223,7 +228,7 @@ export async function runRestore(siteId: string, backupId?: string, options: Res
 
   for (const containerName of [site.wordpressContainerName, site.dbContainerName]) {
     const stopResult = await runCommand("docker", ["stop", containerName], {
-      cwd: site.siteDirectory
+      cwd: siteDirectory
     });
     if (stopResult.code !== 0) {
       throw new Error(stopResult.stderr || `Failed to stop container ${containerName} before restore`);
@@ -236,7 +241,7 @@ export async function runRestore(siteId: string, backupId?: string, options: Res
       "-xzf",
       backup.filesArchivePath,
       "-C",
-      site.siteDirectory
+      siteDirectory
     ]);
     if (extractResult.code !== 0) {
       throw new Error(extractResult.stderr || "Failed to extract archive");
@@ -245,7 +250,7 @@ export async function runRestore(siteId: string, backupId?: string, options: Res
 
   await logRestoreActivity("warn", site, backup.id, `Starting database container for ${site.name}`);
   const startDbResult = await runCommand("docker", ["start", site.dbContainerName], {
-    cwd: site.siteDirectory
+    cwd: siteDirectory
   });
   if (startDbResult.code !== 0) {
     throw new Error(startDbResult.stderr || "Failed to start database container");
@@ -275,7 +280,7 @@ export async function runRestore(siteId: string, backupId?: string, options: Res
 
   for (const containerName of [site.dbContainerName, site.wordpressContainerName]) {
     const restartResult = await runCommand("docker", ["start", containerName], {
-      cwd: site.siteDirectory
+      cwd: siteDirectory
     });
     if (restartResult.code !== 0) {
       throw new Error(restartResult.stderr || `Failed to start container ${containerName}`);

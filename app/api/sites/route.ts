@@ -15,7 +15,7 @@ export async function POST(request: NextRequest) {
     });
 
     const site = await prisma.site.create({
-      data: parsed
+      data: { ...parsed, siteDirectory: null, backupDestination: null }
     });
 
     await logActivity("site", `Site created: ${site.name}`, "info", { siteId: site.id });

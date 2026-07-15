@@ -12,8 +12,10 @@ model Site {
   name                   String
   slug                   String       @unique
   siteUrl                String?
-  siteDirectory          String
-  backupDestination      String
+  siteDirectory          String?
+  backupDestination      String?
+  customSiteDirectory    String?
+  customBackupDestination String?
   dbContainerName        String
   dbName                 String
   dbUser                 String
@@ -75,6 +77,8 @@ model AppSetting {
   appName            String   @default("StackPress")
   appSubtitle        String   @default("Self-Hosted WordPress Stack Manager")
   defaultTimezone    String   @default("America/Chicago")
+  backupRoot         String   @default("./storage")
+  sitesRoot          String   @default("/mnt/wp-sites")
   defaultBackupRoot  String?  @default("./storage")
   defaultLogRoot     String?  @default("./logs")
   schedulerEnabled   Boolean  @default(true)

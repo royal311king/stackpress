@@ -3,6 +3,7 @@ import next from "next";
 
 import { ensureRuntimeDirectories } from "@/lib/config";
 import { startScheduler } from "@/lib/services/scheduler";
+import { migrateLegacySitePaths } from "@/lib/services/settings";
 
 const port = Number(process.env.PORT ?? 3000);
 const dev = process.env.NODE_ENV !== "production";
@@ -14,6 +15,7 @@ async function bootstrap() {
   const handle = app.getRequestHandler();
 
   await app.prepare();
+  await migrateLegacySitePaths();
   await startScheduler();
 
   http

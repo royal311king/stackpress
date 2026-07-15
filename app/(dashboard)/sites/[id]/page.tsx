@@ -10,6 +10,8 @@ import { getWpAdminUrl, normalizeSiteUrl } from "@/lib/site-url";
 import { RESTORABLE_BACKUP_STATUSES } from "@/lib/services/backup";
 import { formatScheduleTime, getNextRunForSite, getScheduleLabel, isScheduleActive, isValidSchedule } from "@/lib/services/scheduler";
 import { formatBytes, formatTimestamp } from "@/lib/utils";
+import { getAppSettings } from "@/lib/services/settings";
+import { resolveBackupFolder, resolveSiteDirectory } from "@/lib/services/paths";
 
 export default async function SiteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -26,6 +28,9 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
   if (!site) {
     notFound();
   }
+  const settings = await getAppSettings();
+  const resolvedSiteDirectory = resolveSiteDirectory(site, settings);
+  const resolvedBackupFolder = resolveBackupFolder(site, settings);
 
   const nextRun = getNextRunForSite(site);
   const lastScheduledBackup = await prisma.backupJob.findFirst({
@@ -171,9 +176,9 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
             <p className="text-sm text-slate-400">Configured Paths</p>
             <div className="mt-3 space-y-2 text-sm">
               <p>Site URL: {siteHref ?? "Not configured"}</p>
-              <p>Site directory: {site.siteDirectory}</p>
+              <p>Site directory: {resolvedSiteDirectory}</p>
               <p>Uploads path: {site.uploadsPath}</p>
-              <p>Backup destination: {site.backupDestination}</p>
+              <p>Backup folder: {resolvedBackupFolder}</p>
             </div>
           </div>
         </SectionCard>
@@ -184,6 +189,7 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
             detectEndpoint={`/api/sites/${site.id}/detect`}
             submitEndpoint={`/api/sites/${site.id}`}
             method="PUT"
+            roots={{ sitesRoot: settings.sitesRoot, backupRoot: settings.backupRoot }}
           />
         </SectionCard>
       </div>

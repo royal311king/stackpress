@@ -4,8 +4,8 @@ export const siteSchema = z.object({
   name: z.string().min(1),
   slug: z.string().min(1),
   siteUrl: z.preprocess((value) => value === "" ? null : value, z.string().optional().nullable()),
-  siteDirectory: z.string().min(1),
-  backupDestination: z.string().min(1),
+  customSiteDirectory: z.preprocess((value) => value === "" ? null : value, z.string().optional().nullable()),
+  customBackupDestination: z.preprocess((value) => value === "" ? null : value, z.string().optional().nullable()),
   dbContainerName: z.string().min(1),
   dbName: z.string().min(1),
   dbUser: z.string().min(1),
@@ -27,7 +27,8 @@ export const siteSchema = z.object({
 
 export const settingsSchema = z.object({
   defaultTimezone: z.string().min(1),
-  defaultBackupRoot: z.string().min(1),
+  backupRoot: z.string().min(1),
+  sitesRoot: z.string().min(1),
   defaultLogRoot: z.string().min(1),
   schedulerEnabled: z.boolean().default(true),
   diskFreeThresholdGb: z.number().int().min(1).max(1000).default(2)
@@ -37,8 +38,8 @@ const siteFieldLabels: Record<string, string> = {
   name: "Site Name",
   slug: "Site Slug",
   siteUrl: "Site URL",
-  siteDirectory: "Site Directory",
-  backupDestination: "Backup Destination",
+  customSiteDirectory: "Custom Site Directory",
+  customBackupDestination: "Custom Backup Folder",
   dbContainerName: "DB Container",
   dbName: "DB Name",
   dbUser: "DB User",

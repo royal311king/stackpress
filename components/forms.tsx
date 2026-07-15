@@ -11,10 +11,11 @@ type SiteFormProps = {
   detectEndpoint: string;
   submitEndpoint: string;
   method: "POST" | "PUT";
+  roots: { sitesRoot: string; backupRoot: string };
 };
 
 type PathPickerTarget = {
-  field: "siteDirectory" | "backupDestination" | "uploadsPath" | "composePath";
+  field: "customSiteDirectory" | "customBackupDestination" | "uploadsPath" | "composePath";
   mode: "directory" | "file";
   title: string;
   initialPath: string;
@@ -227,7 +228,7 @@ function CheckBadge({ check }: { check: PathCheck }) {
   );
 }
 
-export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteFormProps) {
+export function SiteForm({ site, detectEndpoint, submitEndpoint, method, roots }: SiteFormProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
@@ -246,8 +247,8 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
     name: String(site?.name ?? ""),
     slug: String(site?.slug ?? ""),
     siteUrl: String(site?.siteUrl ?? ""),
-    siteDirectory: String(site?.siteDirectory ?? ""),
-    backupDestination: String(site?.backupDestination ?? ""),
+    customSiteDirectory: String(site?.customSiteDirectory ?? ""),
+    customBackupDestination: String(site?.customBackupDestination ?? ""),
     dbContainerName: String(site?.dbContainerName ?? ""),
     dbName: String(site?.dbName ?? "wpdb"),
     dbUser: String(site?.dbUser ?? "wpuser"),
@@ -266,6 +267,11 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
   const [active, setActive] = useState(Boolean(site?.active ?? true));
   const [scheduleEnabled, setScheduleEnabled] = useState(Boolean(site?.scheduleEnabled ?? false));
   const [neverDeleteNewest, setNeverDeleteNewest] = useState(Boolean(site?.neverDeleteNewest ?? true));
+  const [useCustomSiteDirectory, setUseCustomSiteDirectory] = useState(Boolean(site?.customSiteDirectory));
+  const [useCustomBackupDestination, setUseCustomBackupDestination] = useState(Boolean(site?.customBackupDestination));
+  const joinRoot = (root: string, slug: string) => `${root.replace(/\/$/, "")}/${slug || "site-slug"}`;
+  const resolvedSiteDirectory = useCustomSiteDirectory && values.customSiteDirectory ? values.customSiteDirectory : joinRoot(roots.sitesRoot, values.slug);
+  const resolvedBackupDestination = useCustomBackupDestination && values.customBackupDestination ? values.customBackupDestination : joinRoot(roots.backupRoot, values.slug);
 
   useEffect(() => {
     async function loadMounts() {
@@ -297,8 +303,10 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
       name: values.name,
       slug: values.slug,
       siteUrl: values.siteUrl,
-      siteDirectory: values.siteDirectory,
-      backupDestination: values.backupDestination,
+      customSiteDirectory: useCustomSiteDirectory ? values.customSiteDirectory : null,
+      customBackupDestination: useCustomBackupDestination ? values.customBackupDestination : null,
+      siteDirectory: resolvedSiteDirectory,
+      backupDestination: resolvedBackupDestination,
       dbContainerName: values.dbContainerName,
       dbName: values.dbName,
       dbUser: values.dbUser,
@@ -348,7 +356,7 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
     const response = await fetch("/api/filesystem/create", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ path: values.backupDestination })
+      body: JSON.stringify({ path: resolvedBackupDestination })
     });
     const data = await response.json().catch(() => ({}));
     setCreatingFolder(false);
@@ -386,8 +394,7 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
       ...current,
       name: data.siteName ?? current.name,
       slug: data.slug ?? current.slug,
-      siteDirectory: data.siteDirectory ?? current.siteDirectory,
-      backupDestination: current.backupDestination || data.suggestedBackupDestination || current.backupDestination,
+      customSiteDirectory: data.siteDirectory ?? current.customSiteDirectory,
       dbContainerName: data.dbContainerName ?? current.dbContainerName,
       dbName: data.dbName ?? current.dbName,
       dbUser: data.dbUser ?? current.dbUser,
@@ -395,6 +402,7 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
       wordpressContainerName: data.wordpressContainerName ?? current.wordpressContainerName,
       uploadsPath: data.uploadsPath ?? current.uploadsPath
     }));
+    setUseCustomSiteDirectory(Boolean(data.siteDirectory && data.siteDirectory !== joinRoot(roots.sitesRoot, data.slug ?? values.slug)));
     setDetectedVolumeMounts(data.volumeMounts ?? []);
     setFallbackGuesses(data.fallbackGuesses ?? []);
     if (Array.isArray(data.warnings) && data.warnings.length > 0) {
@@ -538,36 +546,30 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method }: SiteF
           </div>
 
           <div className="mt-5 grid gap-5">
-            <label className="block">
-              <span className="mb-2 block text-sm font-medium text-slate-200">Site Directory <span className="text-rose-300">*</span></span>
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-                <input className={getFieldClassName("siteDirectory", "input font-mono text-sm")} name="siteDirectory" value={values.siteDirectory} onChange={(e) => updateField("siteDirectory", e.target.value)} placeholder="/mnt/wp-sites/example-site" spellCheck={false} />
-                <PickerButton label="Browse" onClick={() => openPicker({ field: "siteDirectory", mode: "directory", title: "Choose Site Directory", initialPath: values.siteDirectory || "/mnt" })} />
-              </div>
-              {renderFieldError("siteDirectory")}
-            </label>
+            <div className="space-y-3">
+              <div><span className="block text-sm font-medium text-slate-200">WordPress Site Folder</span><p className="mt-2 break-all rounded-xl bg-slate-950/45 px-4 py-3 font-mono text-sm text-slate-200">{resolvedSiteDirectory}</p></div>
+              <label className="flex items-start gap-3 text-sm text-slate-300"><input type="checkbox" checked={useCustomSiteDirectory} onChange={(e) => setUseCustomSiteDirectory(e.target.checked)} /><span>Use Custom Site Folder<span className="mt-1 block text-xs text-slate-500">Overrides the global WordPress Sites Root for this site only.</span></span></label>
+              {useCustomSiteDirectory ? <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]"><input className="input font-mono text-sm" value={values.customSiteDirectory} onChange={(e) => updateField("customSiteDirectory", e.target.value)} spellCheck={false} /><PickerButton label="Browse" onClick={() => openPicker({ field: "customSiteDirectory", mode: "directory", title: "Choose Custom Site Folder", initialPath: values.customSiteDirectory || roots.sitesRoot })} /></div> : null}
+            </div>
 
-            <label className="block">
-              <span className="mb-2 block text-sm font-medium text-slate-200">Backup Destination <span className="text-rose-300">*</span></span>
-              <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-                <input className={getFieldClassName("backupDestination", "input font-mono text-sm")} name="backupDestination" value={values.backupDestination} onChange={(e) => updateField("backupDestination", e.target.value)} placeholder="/mnt/wp-backups/example-site" spellCheck={false} />
-                <PickerButton label="Browse" onClick={() => openPicker({ field: "backupDestination", mode: "directory", title: "Choose Backup Destination", initialPath: values.backupDestination || "/mnt" })} />
-              </div>
-              {renderFieldError("backupDestination")}
-            </label>
+            <div className="space-y-3">
+              <div><span className="block text-sm font-medium text-slate-200">Backup Folder</span><p className="mt-2 break-all rounded-xl bg-slate-950/45 px-4 py-3 font-mono text-sm text-slate-200">{resolvedBackupDestination}</p></div>
+              <label className="flex items-start gap-3 text-sm text-slate-300"><input type="checkbox" checked={useCustomBackupDestination} onChange={(e) => setUseCustomBackupDestination(e.target.checked)} /><span>Use Custom Backup Folder<span className="mt-1 block text-xs text-slate-500">Overrides the global Backup Root for this site only.</span></span></label>
+              {useCustomBackupDestination ? <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]"><input className="input font-mono text-sm" value={values.customBackupDestination} onChange={(e) => updateField("customBackupDestination", e.target.value)} spellCheck={false} /><PickerButton label="Browse" onClick={() => openPicker({ field: "customBackupDestination", mode: "directory", title: "Choose Custom Backup Folder", initialPath: values.customBackupDestination || roots.backupRoot })} /></div> : null}
+            </div>
 
             <label className="block">
               <span className="mb-2 block text-sm font-medium text-slate-200">Uploads Path <span className="text-rose-300">*</span></span>
               <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
                 <input className={getFieldClassName("uploadsPath", "input font-mono text-sm")} name="uploadsPath" value={values.uploadsPath} onChange={(e) => updateField("uploadsPath", e.target.value)} placeholder="/mnt/wp-sites/example-site/html/wp-content/uploads" spellCheck={false} />
-                <PickerButton label="Browse" onClick={() => openPicker({ field: "uploadsPath", mode: "directory", title: "Choose Uploads Path", initialPath: values.uploadsPath || values.siteDirectory || "/mnt" })} />
+                <PickerButton label="Browse" onClick={() => openPicker({ field: "uploadsPath", mode: "directory", title: "Choose Uploads Path", initialPath: values.uploadsPath || resolvedSiteDirectory })} />
               </div>
               {renderFieldError("uploadsPath")}
             </label>
           </div>
 
           <div className="mt-5 flex flex-wrap gap-3">
-            <button type="button" onClick={() => openPicker({ field: "composePath", mode: "file", title: "Select docker-compose.yml", initialPath: values.siteDirectory || "/mnt" })} className="btn btn-secondary inline-flex items-center justify-center gap-2" disabled={detecting}>
+            <button type="button" onClick={() => openPicker({ field: "composePath", mode: "file", title: "Select docker-compose.yml", initialPath: resolvedSiteDirectory })} className="btn btn-secondary inline-flex items-center justify-center gap-2" disabled={detecting}>
               <FileSearch aria-hidden="true" className="h-4 w-4" />
               <span>{detecting ? "Detecting..." : "Auto-Detect docker-compose"}</span>
             </button>
@@ -1020,6 +1022,15 @@ export function DeleteBackupButton({ endpoint }: { endpoint: string }) {
 export function SettingsForm({ initial }: { initial: Record<string, unknown> }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const [backupRoot, setBackupRoot] = useState(String(initial.backupRoot ?? initial.defaultBackupRoot ?? ""));
+  const [sitesRoot, setSitesRoot] = useState(String(initial.sitesRoot ?? "/mnt/wp-sites"));
+  const [message, setMessage] = useState<string | null>(null);
+
+  async function createFolder(targetPath: string) {
+    const response = await fetch("/api/filesystem/create", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: targetPath }) });
+    const data = await response.json().catch(() => ({}));
+    setMessage(response.ok ? `Created ${data.path}.` : data.error ?? "Unable to create folder");
+  }
 
   return (
     <form
@@ -1033,7 +1044,8 @@ export function SettingsForm({ initial }: { initial: Record<string, unknown> }) 
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               defaultTimezone: formData.get("defaultTimezone"),
-              defaultBackupRoot: formData.get("defaultBackupRoot"),
+              backupRoot: formData.get("backupRoot"),
+              sitesRoot: formData.get("sitesRoot"),
               defaultLogRoot: formData.get("defaultLogRoot"),
               schedulerEnabled: formData.get("schedulerEnabled") === "on",
               diskFreeThresholdGb: Number(formData.get("diskFreeThresholdGb"))
@@ -1052,10 +1064,8 @@ export function SettingsForm({ initial }: { initial: Record<string, unknown> }) 
         <span className="mb-2 block text-sm text-slate-300">Default Timezone</span>
         <input className="input" defaultValue={String(initial.defaultTimezone ?? "")} name="defaultTimezone" />
       </label>
-      <label className="block">
-        <span className="mb-2 block text-sm text-slate-300">Default Backup Root</span>
-        <input className="input" defaultValue={String(initial.defaultBackupRoot ?? "")} name="defaultBackupRoot" />
-      </label>
+      <div><label className="block"><span className="mb-2 block text-sm font-medium text-slate-200">Backup Root</span><input className="input font-mono text-sm" value={backupRoot} onChange={(e) => setBackupRoot(e.target.value)} name="backupRoot" spellCheck={false} /><span className="mt-2 block text-xs text-slate-500">Every standard backup folder resolves to Backup Root / site slug.</span></label><button className="btn btn-secondary mt-3" type="button" onClick={() => createFolder(backupRoot)}>Create Folder</button></div>
+      <div><label className="block"><span className="mb-2 block text-sm font-medium text-slate-200">WordPress Sites Root</span><input className="input font-mono text-sm" value={sitesRoot} onChange={(e) => setSitesRoot(e.target.value)} name="sitesRoot" spellCheck={false} /><span className="mt-2 block text-xs text-slate-500">Every standard site folder resolves to WordPress Sites Root / site slug.</span></label><button className="btn btn-secondary mt-3" type="button" onClick={() => createFolder(sitesRoot)}>Create Folder</button></div>
       <label className="block">
         <span className="mb-2 block text-sm text-slate-300">Default Log Root</span>
         <input className="input" defaultValue={String(initial.defaultLogRoot ?? "")} name="defaultLogRoot" />
@@ -1071,6 +1081,7 @@ export function SettingsForm({ initial }: { initial: Record<string, unknown> }) 
       <button className="btn btn-primary" disabled={pending} type="submit">
         {pending ? "Saving..." : "Save Settings"}
       </button>
+      {message ? <p className="text-sm text-slate-300" role="status">{message}</p> : null}
     </form>
   );
 }

@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getAppSettings } from "@/lib/services/settings";
+import { resolveBackupFolder, resolveSiteDirectory } from "@/lib/services/paths";
 import { getDirectoryUsage } from "@/lib/filesystem";
 import { formatScheduleTime, getNextRunForSite, getScheduleLabel, isScheduleActive, isValidSchedule } from "@/lib/services/scheduler";
 
@@ -49,7 +50,7 @@ export async function getDashboardData() {
   ]);
 
   const storageUsage = sites.reduce((total, site) => {
-    return total + getDirectoryUsage(site.backupDestination);
+    return total + getDirectoryUsage(resolveBackupFolder(site, settings));
   }, 0);
 
   const enrichedSites = await Promise.all(
@@ -65,6 +66,7 @@ export async function getDashboardData() {
       const nextRun = getNextRunForSite(site);
       return {
         ...site,
+        resolvedSiteDirectory: resolveSiteDirectory(site, settings),
         scheduleState: isScheduleActive(site) ? (isValidSchedule(site) ? "enabled" : "invalid") : "disabled",
         scheduleLabel: getScheduleLabel(site),
         nextRun,
