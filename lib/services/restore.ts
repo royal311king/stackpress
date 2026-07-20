@@ -55,6 +55,10 @@ function validateRestoreArtifacts(backupType: string, dbDumpPath?: string | null
 type RestoreOptions = {
   createSafetySnapshot?: boolean;
   continueWithoutSafetySnapshot?: boolean;
+  artifactPaths?: {
+    dbDumpPath: string | null;
+    filesArchivePath: string | null;
+  };
 };
 
 type RestoreSite = {
@@ -199,7 +203,9 @@ export async function runRestore(siteId: string, backupId?: string, options: Res
     throw new Error("No successful backup available for restore");
   }
 
-  validateRestoreArtifacts(backup.backupType, backup.dbDumpPath, backup.filesArchivePath);
+  const dbDumpPath = options.artifactPaths ? options.artifactPaths.dbDumpPath : backup.dbDumpPath;
+  const filesArchivePath = options.artifactPaths ? options.artifactPaths.filesArchivePath : backup.filesArchivePath;
+  validateRestoreArtifacts(backup.backupType, dbDumpPath, filesArchivePath);
 
   if (options.createSafetySnapshot) {
     try {
@@ -235,11 +241,11 @@ export async function runRestore(siteId: string, backupId?: string, options: Res
     }
   }
 
-  if (backup.filesArchivePath) {
+  if (filesArchivePath) {
     await logRestoreActivity("warn", site, backup.id, `Extracting files for ${site.name}`);
     const extractResult = await runCommand("tar", [
       "-xzf",
-      backup.filesArchivePath,
+      filesArchivePath,
       "-C",
       siteDirectory
     ]);
@@ -256,7 +262,7 @@ export async function runRestore(siteId: string, backupId?: string, options: Res
     throw new Error(startDbResult.stderr || "Failed to start database container");
   }
 
-  if (backup.dbDumpPath) {
+  if (dbDumpPath) {
     await logRestoreActivity("warn", site, backup.id, `Importing SQL backup for ${site.name}`);
     const importResult = await runCommand(
       "docker",
@@ -269,7 +275,7 @@ export async function runRestore(siteId: string, backupId?: string, options: Res
         `-p${site.dbPassword}`,
         site.dbName
       ],
-      { stdinFile: backup.dbDumpPath }
+      { stdinFile: dbDumpPath }
     );
     if (importResult.code !== 0) {
       throw new Error(importResult.stderr || "Failed to import SQL backup");

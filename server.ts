@@ -4,6 +4,9 @@ import next from "next";
 import { ensureRuntimeDirectories } from "@/lib/config";
 import { startScheduler } from "@/lib/services/scheduler";
 import { migrateLegacySitePaths } from "@/lib/services/settings";
+import { registerBuiltInCloudStorageProviders } from "@/lib/services/cloud-storage/providers";
+import { startCloudUploadWorker } from "@/lib/services/cloud-storage/upload-worker";
+import { startRemoteRestoreWorker } from "@/lib/services/cloud-storage/remote-restore-jobs";
 
 const port = Number(process.env.PORT ?? 3000);
 const dev = process.env.NODE_ENV !== "production";
@@ -15,8 +18,11 @@ async function bootstrap() {
   const handle = app.getRequestHandler();
 
   await app.prepare();
+  registerBuiltInCloudStorageProviders();
   await migrateLegacySitePaths();
   await startScheduler();
+  await startCloudUploadWorker();
+  await startRemoteRestoreWorker();
 
   http
     .createServer((req, res) => handle(req, res))

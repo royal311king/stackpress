@@ -44,6 +44,7 @@ model Site {
   createdAt              DateTime     @default(now())
   updatedAt              DateTime     @updatedAt
   backups                BackupJob[]
+  cloudDestinations      SiteCloudDestination[]
 
   @@index([active, scheduleEnabled])
 }
@@ -65,6 +66,7 @@ model BackupJob {
   progressStep     String?
   errorMessage     String?
   logExcerpt       String?
+  isPinned         Boolean  @default(false)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -96,4 +98,119 @@ model ActivityLog {
   createdAt DateTime @default(now())
 
   @@index([createdAt])
+}
+
+model CloudStorageConnection {
+  id                   String   @id @default(cuid())
+  provider             String
+  displayName          String
+  accountEmail         String?
+  enabled              Boolean  @default(true)
+  status               String   @default("pending")
+  encryptedCredentials String?
+  credentialReference  String?
+  credentialKeyVersion Int?
+  providerConfigJson   String   @default("{}")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  lastConnectedAt      DateTime?
+  lastTestedAt         DateTime?
+  lastSuccessfulTestAt DateTime?
+  lastError            String?
+  siteDestinations     SiteCloudDestination[]
+
+  @@index([provider, enabled])
+  @@index([status, updatedAt])
+}
+
+model SiteCloudDestination {
+  id                       String   @id @default(cuid())
+  siteId                   String
+  site                     Site     @relation(fields: [siteId], references: [id], onDelete: Cascade)
+  cloudConnectionId        String
+  cloudConnection          CloudStorageConnection @relation(fields: [cloudConnectionId], references: [id], onDelete: Cascade)
+  enabled                  Boolean  @default(true)
+  uploadScheduledBackups   Boolean  @default(true)
+  uploadManualBackups      Boolean  @default(true)
+  remoteFolderName         String?
+  retentionPolicy          String   @default("retain_remote")
+  providerConfigJson       String   @default("{}")
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  @@unique([siteId, cloudConnectionId])
+  @@index([cloudConnectionId, enabled])
+}
+
+model CloudBackupFile {
+  id                String   @id @default(cuid())
+  cloudConnectionId String
+  backupId          String
+  siteId            String
+  artifactKind      String
+  provider          String
+  remoteFileId      String?
+  remoteFolderId    String?
+  remoteName        String
+  remoteSize        BigInt?
+  localSize         BigInt?
+  localChecksum     String?
+  remoteChecksum    String?
+  checksumAlgorithm String?
+  uploadStatus      String   @default("pending")
+  uploadedAt        DateTime?
+  verifiedAt        DateTime?
+  verificationStatus String  @default("idle")
+  deletionStatus    String   @default("not_requested")
+  deletionAttemptedAt DateTime?
+  deletedAt         DateTime?
+  lastError         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([cloudConnectionId, backupId, artifactKind])
+  @@index([backupId, cloudConnectionId])
+  @@index([uploadStatus, updatedAt])
+  @@index([provider, remoteFileId])
+}
+
+model CloudUploadJob {
+  id                String   @id @default(cuid())
+  backupId          String
+  cloudConnectionId String
+  provider          String
+  destinationConfigJson String @default("{}")
+  status            String   @default("queued")
+  progressPercent   Int      @default(0)
+  attempts          Int      @default(0)
+  maxAttempts       Int      @default(4)
+  nextAttemptAt     DateTime @default(now())
+  startedAt         DateTime?
+  completedAt       DateTime?
+  heartbeatAt       DateTime?
+  lastError         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([backupId, cloudConnectionId])
+  @@index([status, nextAttemptAt])
+  @@index([backupId, status])
+}
+
+model RemoteRestoreJob {
+  id                String   @id @default(cuid())
+  backupId          String
+  cloudConnectionId String
+  provider          String
+  status            String   @default("queued")
+  attempts          Int      @default(0)
+  startedAt         DateTime?
+  completedAt       DateTime?
+  heartbeatAt       DateTime?
+  lastError         String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@unique([backupId, cloudConnectionId])
+  @@index([status, createdAt])
 }

@@ -6,7 +6,10 @@ import { AutoRefresh } from "@/components/auto-refresh";
 import { PageHeader, SectionCard } from "@/components/cards";
 import { DeleteBackupButton, RestoreBackupButton } from "@/components/forms";
 import { StatusBadge } from "@/components/status-badge";
+import { CloudBackupActions } from "@/components/cloud-upload-actions";
 import { getBackupDetail } from "@/lib/services/backup-details";
+import { safeGoogleDriveFolderUrl } from "@/lib/services/cloud-storage/remote-copies";
+import { requiredBackupArtifactKinds } from "@/lib/services/cloud-storage/types";
 import { formatBytes, formatTimestamp } from "@/lib/utils";
 
 function basename(value?: string | null) {
@@ -26,7 +29,7 @@ export default async function BackupDetailPage({ params }: { params: Promise<{ i
     notFound();
   }
 
-  const { backup, manifest, relevantLogs, retention } = detail;
+  const { backup, cloudUploads, cloudFiles, cloudDestinations, remoteRestoreJobs, manifest, relevantLogs, retention } = detail;
   const warnings = [
     ...(Array.isArray(manifest?.warnings) ? manifest.warnings : []),
     ...(backup.logExcerpt ? [backup.logExcerpt] : [])
@@ -35,6 +38,19 @@ export default async function BackupDetailPage({ params }: { params: Promise<{ i
   const manifestJson = backup.manifestPath && fs.existsSync(backup.manifestPath)
     ? fs.readFileSync(backup.manifestPath, "utf8")
     : null;
+  const localAvailable = Boolean(
+    (backup.backupType === "files" || backup.backupType === "full" ? backup.filesArchivePath && fs.existsSync(backup.filesArchivePath) : true) &&
+    (backup.backupType === "database" || backup.backupType === "full" ? backup.dbDumpPath && fs.existsSync(backup.dbDumpPath) : true)
+  );
+  const destinationIds = [...new Set([
+    ...cloudDestinations.map((destination) => destination.cloudConnectionId),
+    ...cloudUploads.map((upload) => upload.cloudConnectionId)
+  ])];
+  const hasVerifiedRemoteCopy = destinationIds.some((connectionId) => {
+    const files = cloudFiles.filter((file) => file.cloudConnectionId === connectionId && file.uploadStatus === "success");
+    const verifiedKinds = new Set(files.filter((file) => file.verifiedAt && file.verificationStatus === "verified").map((file) => file.artifactKind));
+    return requiredBackupArtifactKinds(backup.backupType).every((kind) => verifiedKinds.has(kind));
+  });
 
   return (
     <div>
@@ -55,7 +71,7 @@ export default async function BackupDetailPage({ params }: { params: Promise<{ i
               filesArchivePath={backup.filesArchivePath}
               detailMessage={backup.logExcerpt ?? backup.errorMessage ?? null}
             />
-            <DeleteBackupButton endpoint={`/api/backups/${backup.id}/delete`} />
+            <DeleteBackupButton endpoint={`/api/backups/${backup.id}/delete`} hasVerifiedRemoteCopy={hasVerifiedRemoteCopy} />
           </>
         }
       />
@@ -66,9 +82,9 @@ export default async function BackupDetailPage({ params }: { params: Promise<{ i
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <p className="text-sm text-slate-400">Site</p>
               <p className="mt-2 text-lg font-medium">{backup.site.name}</p>
-              <p className="mt-4 text-sm text-slate-400">Timestamp</p>
+              <p className="mt-4 text-sm text-slate-400">Created</p>
               <p className="mt-2 text-sm text-slate-200">{formatTimestamp(backup.startedAt ?? backup.createdAt)}</p>
-              <p className="mt-4 text-sm text-slate-400">Status</p>
+              <p className="mt-4 text-sm text-slate-400">Local backup status</p>
               <div className="mt-2"><StatusBadge value={backup.status} /></div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
@@ -78,7 +94,7 @@ export default async function BackupDetailPage({ params }: { params: Promise<{ i
               <p className="mt-2 text-sm text-slate-200 capitalize">{backup.backupType}</p>
               <p className="mt-4 text-sm text-slate-400">Duration</p>
               <p className="mt-2 text-sm text-slate-200">{backup.durationSeconds ? `${backup.durationSeconds}s` : "-"}</p>
-              <p className="mt-4 text-sm text-slate-400">Total size</p>
+              <p className="mt-4 text-sm text-slate-400">Local file size</p>
               <p className="mt-2 text-sm text-slate-200">{formatBytes(backup.totalBytes)}</p>
             </div>
           </div>
@@ -142,6 +158,45 @@ export default async function BackupDetailPage({ params }: { params: Promise<{ i
             <div className="mt-4 rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-400">
               No manifest data was available for this backup.
             </div>
+          )}
+        </SectionCard>
+      </div>
+
+      <div className="mt-6">
+        <SectionCard title="Cloud Destinations" description="The local backup status remains independent from each cloud upload task.">
+          {destinationIds.length ? (
+            <div className="space-y-3">
+              {destinationIds.map((connectionId) => {
+                const upload = cloudUploads.find((item) => item.cloudConnectionId === connectionId);
+                const destination = cloudDestinations.find((item) => item.cloudConnectionId === connectionId);
+                const files = cloudFiles.filter((file) => file.cloudConnectionId === connectionId && file.uploadStatus !== "deleted");
+                const hasRemoteCopy = files.some((file) => file.uploadStatus === "success" && file.remoteFileId);
+                const verified = hasRemoteCopy && files.filter((file) => file.uploadStatus === "success").every((file) => file.verifiedAt);
+                const remoteBytes = files.reduce((total, file) => total + (file.remoteSize ?? 0n), 0n);
+                const uploadedAt = files.map((file) => file.uploadedAt).filter((value): value is Date => Boolean(value)).sort((a, b) => b.getTime() - a.getTime())[0];
+                const remoteError = upload?.lastError ?? files.find((file) => file.lastError)?.lastError;
+                const folderId = files.find((file) => file.remoteFolderId)?.remoteFolderId;
+                const restoreJob = remoteRestoreJobs.find((job) => job.cloudConnectionId === connectionId);
+                return <div key={connectionId} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <p className="font-medium">{destination?.cloudConnection.displayName ?? "Google Drive"}</p>
+                      <p className="mt-1 text-xs text-slate-500">{destination?.cloudConnection.accountEmail ?? connectionId}</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2"><StatusBadge value={upload?.status ?? "not_uploaded"} /><StatusBadge value={verified ? "verified" : hasRemoteCopy ? "unverified" : "not_verified"} /></div>
+                  </div>
+                  {upload?.status === "running" ? (
+                    <div className="mt-3"><div className="h-2 overflow-hidden rounded-full bg-white/10"><div className="h-full bg-cyan-400" style={{ width: `${upload.progressPercent}%` }} /></div><p className="mt-2 text-xs text-slate-400">Upload progress {upload.progressPercent}%</p></div>
+                  ) : null}
+                  <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-3"><div><dt className="text-slate-500">Remote size</dt><dd className="mt-1 text-slate-200">{hasRemoteCopy ? formatBytes(remoteBytes) : "—"}</dd></div><div><dt className="text-slate-500">Uploaded</dt><dd className="mt-1 text-slate-200">{formatTimestamp(uploadedAt)}</dd></div><div><dt className="text-slate-500">Verification</dt><dd className="mt-1 text-slate-200">{verified ? "Verified" : hasRemoteCopy ? "Verification required" : "Not uploaded"}</dd></div></dl>
+                  {remoteError ? <p className="mt-3 rounded-xl bg-rose-400/10 px-3 py-2 text-sm text-rose-200">{remoteError}</p> : null}
+                  {restoreJob ? <p className="mt-3 text-sm text-slate-300">Remote restore: <StatusBadge value={restoreJob.status} />{restoreJob.lastError ? <span className="ml-2 text-rose-200">{restoreJob.lastError}</span> : null}</p> : null}
+                  <div className="mt-4"><CloudBackupActions backupId={backup.id} connectionId={connectionId} uploadId={upload?.id} uploadStatus={upload?.status} restoreStatus={restoreJob?.status} hasRemoteCopy={hasRemoteCopy} remoteVerified={verified} localAvailable={localAvailable} openUrl={safeGoogleDriveFolderUrl(folderId)} /></div>
+                </div>
+              })}
+            </div>
+          ) : (
+            <p className="text-sm text-slate-400">Local backup completed. No cloud destination was queued.</p>
           )}
         </SectionCard>
       </div>

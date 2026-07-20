@@ -7,8 +7,10 @@
     "build": "next build",
     "start": "NODE_ENV=production tsx server.ts",
     "lint": "eslint .",
+    "test:cloud-storage": "node --import tsx --test lib/services/cloud-storage/*.test.ts lib/services/cloud-storage/providers/*.test.ts lib/auth/*.test.ts components/*.test.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
+    "prisma:deploy": "prisma migrate deploy",
     "prisma:push": "prisma db push"
   },
   "dependencies": {
@@ -17,6 +19,7 @@
     "cron-parser": "^5.2.0",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
+    "googleapis": "^173.0.0",
     "js-yaml": "^4.1.0",
     "lucide-react": "^0.511.0",
     "next": "^16.0.0",

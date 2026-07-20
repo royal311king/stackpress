@@ -155,25 +155,86 @@ That snapshot includes:
 ```bash
 npm ci
 cp .env.example .env
+touch data/stackpress.db
 npx prisma generate
-npx prisma db push
+npx prisma migrate deploy
 npm run dev
 ```
 
 ### Database migration after pulling updates
 
-When Prisma schema fields change, update the local SQLite database with:
+StackPress now uses checked-in Prisma migrations. A new database can be created with:
 
 ```bash
 npx prisma generate
-npx prisma db push
+npx prisma migrate deploy
 ```
 
-Docker starts also run `prisma db push --skip-generate` from the entrypoint so existing mounted databases receive additive schema updates.
+Existing StackPress databases created by older releases used `prisma db push` and have no migration history. Back up the database, mark the pre-cloud schema as the baseline once, and then deploy the additive cloud migrations:
+
+```bash
+cp data/stackpress.db "data/stackpress.db.backup-$(date +%Y%m%d-%H%M%S)"
+npx prisma generate
+npx prisma migrate resolve --applied 20260715000000_baseline_stackpress_schema
+npx prisma migrate deploy
+```
+
+Do not run `migrate resolve` on a brand-new empty database. Docker image builds and container starts now run `prisma migrate deploy`; an upgraded mounted database must be baselined before starting the new container.
 
 Open [http://localhost:3000](http://localhost:3000).
 
 ## Docker Usage
+
+### Google Drive OAuth setup
+
+StackPress can connect one or more Google Drive accounts. After a local backup
+completes successfully, enabled connections upload the existing database archive,
+files archive, and manifest without changing the local backup format. Files are
+stored under `StackPress Backups/<installation>/<site>/`. Set
+`STACKPRESS_INSTALLATION_NAME` for a stable installation folder name; otherwise
+StackPress uses the machine hostname. Cloud failures are recorded separately and
+never change or remove the completed local backup.
+
+Cloud uploads run as durable background jobs rather than inside backup HTTP
+requests. A completed local backup creates one idempotent job per enabled
+destination. Interrupted jobs are recovered after restart, active uploads protect
+their local archives from retention cleanup, and failed jobs can be retried through
+`POST /api/cloud-storage/uploads/<upload-job-id>/retry`. Queue or inspect an
+existing backup with `POST` or `GET /api/backups/<backup-id>/cloud-uploads`.
+
+Sites remain local-only until cloud copies are explicitly enabled in that site's
+backup configuration. Each site can select multiple connected accounts, choose a
+Google Drive site-folder name, and control automatic uploads separately for
+scheduled and manual backups. Removing a destination only stops future uploads;
+it does not delete remote copies already created.
+
+1. In Google Cloud Console, enable the Google Drive API.
+2. Configure the OAuth consent screen.
+3. Create an OAuth 2.0 Client ID with application type **Web application**.
+4. Add this exact authorized redirect URI for local development:
+
+```text
+http://localhost:3000/api/cloud-storage/google/callback
+```
+
+For another StackPress URL, use the same callback path on that origin and set `GOOGLE_OAUTH_REDIRECT_URI` to the exact registered value. Google rejects redirect URI differences, including scheme, host, port, or path differences.
+
+Configure these environment variables:
+
+```text
+STACKPRESS_SECRET_KEY=<base64-encoded 32-byte key>
+STACKPRESS_ADMIN_USERNAME=admin
+STACKPRESS_ADMIN_PASSWORD=<strong password>
+GOOGLE_OAUTH_CLIENT_ID=<OAuth web client ID>
+GOOGLE_OAUTH_CLIENT_SECRET=<OAuth web client secret>
+GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3000/api/cloud-storage/google/callback
+```
+
+Generate the encryption key once with `openssl rand -base64 32` and keep it stable. Losing it makes stored cloud tokens unreadable. Do not commit these values.
+
+The connection flow requests offline access and the narrow `drive.file` scope, which lets StackPress manage files it creates without unrestricted access to the account's Drive. It also requests Google identity email information so the connected account can be identified in Settings.
+
+StackPress does not yet have a general user/session system. OAuth start and disconnect routes therefore fail closed unless the temporary HTTP Basic administrator credentials above are configured. The OAuth callback is bound to the initiating administrator browser with a short-lived, signed, HttpOnly state cookie.
 
 ### Run with Docker Compose
 

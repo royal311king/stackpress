@@ -5,15 +5,28 @@ import { prisma } from "@/lib/prisma";
 import { logActivity } from "@/lib/services/logging";
 import { formatSiteValidationError, siteSchema } from "@/lib/validators";
 import { slugify } from "@/lib/utils";
+import { cloudConnectionService } from "@/lib/services/cloud-storage/connections";
+import { saveSiteCloudDestinations, siteCloudDestinationsSchema, validateAuthorizedDestinations } from "@/lib/services/cloud-storage/site-destinations";
 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
     const body = await request.json();
+    const cloudDestinations = siteCloudDestinationsSchema.parse(body.cloudDestinations ?? []);
+    const [connections, existingDestinations] = await Promise.all([
+      cloudConnectionService.list(),
+      prisma.siteCloudDestination.findMany({ where: { siteId: id } })
+    ]);
+    validateAuthorizedDestinations(
+      cloudDestinations,
+      connections,
+      new Set(existingDestinations.map((destination) => destination.cloudConnectionId))
+    );
     const parsed = siteSchema.parse({
       ...body,
       slug: slugify(body.slug || body.name)
     });
+    await saveSiteCloudDestinations(id, cloudDestinations, connections);
 
     const site = await prisma.site.update({
       where: { id },

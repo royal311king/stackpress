@@ -12,6 +12,7 @@ import { formatScheduleTime, getNextRunForSite, getScheduleLabel, isScheduleActi
 import { formatBytes, formatTimestamp } from "@/lib/utils";
 import { getAppSettings } from "@/lib/services/settings";
 import { resolveBackupFolder, resolveSiteDirectory } from "@/lib/services/paths";
+import { cloudConnectionService } from "@/lib/services/cloud-storage/connections";
 
 export default async function SiteDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -21,7 +22,8 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
       backups: {
         orderBy: { createdAt: "desc" },
         take: 20
-      }
+      },
+      cloudDestinations: true
     }
   });
 
@@ -29,6 +31,7 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
     notFound();
   }
   const settings = await getAppSettings();
+  const cloudConnections = await cloudConnectionService.list();
   const resolvedSiteDirectory = resolveSiteDirectory(site, settings);
   const resolvedBackupFolder = resolveBackupFolder(site, settings);
 
@@ -190,6 +193,15 @@ export default async function SiteDetailPage({ params }: { params: Promise<{ id:
             submitEndpoint={`/api/sites/${site.id}`}
             method="PUT"
             roots={{ sitesRoot: settings.sitesRoot, backupRoot: settings.backupRoot }}
+            cloudConnections={cloudConnections}
+            cloudDestinations={site.cloudDestinations.map((destination) => ({
+              cloudConnectionId: destination.cloudConnectionId,
+              enabled: destination.enabled,
+              uploadScheduledBackups: destination.uploadScheduledBackups,
+              uploadManualBackups: destination.uploadManualBackups,
+              retentionPolicy: destination.retentionPolicy as "delete_with_local" | "retain_remote",
+              remoteFolderName: destination.remoteFolderName
+            }))}
           />
         </SectionCard>
       </div>

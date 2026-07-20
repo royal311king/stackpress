@@ -10,9 +10,11 @@ import { formatRelative, formatTimestamp } from "@/lib/utils";
 import { formatScheduleTime, getNextRunForSite, getScheduleLabel, isScheduleActive, isValidSchedule } from "@/lib/services/scheduler";
 import { getAppSettings } from "@/lib/services/settings";
 import { resolveBackupFolder, resolveSiteDirectory } from "@/lib/services/paths";
+import { cloudConnectionService } from "@/lib/services/cloud-storage/connections";
 
 export default async function SitesPage() {
   const settings = await getAppSettings();
+  const cloudConnections = await cloudConnectionService.list();
   const sites = await prisma.site.findMany({
     include: {
       backups: {
@@ -115,7 +117,7 @@ export default async function SitesPage() {
               <SiteAutoDetectButton fullWidth />
             </div>
           </div>
-          <SiteForm detectEndpoint="/api/sites/detect" submitEndpoint="/api/sites" method="POST" roots={{ sitesRoot: settings.sitesRoot, backupRoot: settings.backupRoot }} />
+          <SiteForm detectEndpoint="/api/sites/detect" submitEndpoint="/api/sites" method="POST" roots={{ sitesRoot: settings.sitesRoot, backupRoot: settings.backupRoot }} cloudConnections={cloudConnections} />
         </SectionCard>
       </div>
     </div>

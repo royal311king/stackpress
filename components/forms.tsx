@@ -12,6 +12,24 @@ type SiteFormProps = {
   submitEndpoint: string;
   method: "POST" | "PUT";
   roots: { sitesRoot: string; backupRoot: string };
+  cloudConnections?: Array<{
+    id: string;
+    provider: string;
+    displayName: string;
+    accountEmail: string | null;
+    enabled: boolean;
+    status: string;
+  }>;
+  cloudDestinations?: CloudDestinationValue[];
+};
+
+type CloudDestinationValue = {
+  cloudConnectionId: string;
+  enabled: boolean;
+  uploadScheduledBackups: boolean;
+  uploadManualBackups: boolean;
+  retentionPolicy: "delete_with_local" | "retain_remote";
+  remoteFolderName?: string | null;
 };
 
 type PathPickerTarget = {
@@ -228,7 +246,7 @@ function CheckBadge({ check }: { check: PathCheck }) {
   );
 }
 
-export function SiteForm({ site, detectEndpoint, submitEndpoint, method, roots }: SiteFormProps) {
+export function SiteForm({ site, detectEndpoint, submitEndpoint, method, roots, cloudConnections = [], cloudDestinations = [] }: SiteFormProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [message, setMessage] = useState<string | null>(null);
@@ -269,6 +287,10 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method, roots }
   const [neverDeleteNewest, setNeverDeleteNewest] = useState(Boolean(site?.neverDeleteNewest ?? true));
   const [useCustomSiteDirectory, setUseCustomSiteDirectory] = useState(Boolean(site?.customSiteDirectory));
   const [useCustomBackupDestination, setUseCustomBackupDestination] = useState(Boolean(site?.customBackupDestination));
+  const [cloudCopiesEnabled, setCloudCopiesEnabled] = useState(cloudDestinations.length > 0);
+  const [selectedCloudDestinations, setSelectedCloudDestinations] = useState<CloudDestinationValue[]>(cloudDestinations);
+  const [testingCloudConnectionId, setTestingCloudConnectionId] = useState<string | null>(null);
+  const [cloudTestMessages, setCloudTestMessages] = useState<Record<string, { ok: boolean; message: string }>>({});
   const joinRoot = (root: string, slug: string) => `${root.replace(/\/$/, "")}/${slug || "site-slug"}`;
   const resolvedSiteDirectory = useCustomSiteDirectory && values.customSiteDirectory ? values.customSiteDirectory : joinRoot(roots.sitesRoot, values.slug);
   const resolvedBackupDestination = useCustomBackupDestination && values.customBackupDestination ? values.customBackupDestination : joinRoot(roots.backupRoot, values.slug);
@@ -323,8 +345,44 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method, roots }
       backupMode: values.backupMode,
       active,
       scheduleEnabled,
-      neverDeleteNewest
+      neverDeleteNewest,
+      cloudDestinations: cloudCopiesEnabled ? selectedCloudDestinations : []
     };
+  }
+
+  function selectedDestination(connectionId: string) {
+    return selectedCloudDestinations.find((destination) => destination.cloudConnectionId === connectionId);
+  }
+
+  function toggleCloudConnection(connectionId: string, selected: boolean) {
+    setFieldErrors((current) => ({ ...current, cloudDestinations: "" }));
+    setSelectedCloudDestinations((current) => selected
+      ? [...current, {
+          cloudConnectionId: connectionId,
+          enabled: true,
+          uploadScheduledBackups: true,
+          uploadManualBackups: true,
+          retentionPolicy: "retain_remote",
+          remoteFolderName: null
+        }]
+      : current.filter((destination) => destination.cloudConnectionId !== connectionId));
+  }
+
+  function updateCloudDestination(connectionId: string, patch: Partial<CloudDestinationValue>) {
+    setSelectedCloudDestinations((current) => current.map((destination) =>
+      destination.cloudConnectionId === connectionId ? { ...destination, ...patch } : destination
+    ));
+  }
+
+  async function testCloudConnection(connectionId: string) {
+    setTestingCloudConnectionId(connectionId);
+    const response = await fetch(`/api/cloud-storage/connections/${connectionId}/test`, { method: "POST" });
+    const data = await response.json().catch(() => ({}));
+    setCloudTestMessages((current) => ({
+      ...current,
+      [connectionId]: { ok: response.ok, message: response.ok ? data.result?.message ?? "Connection succeeded." : data.error ?? "Connection test failed." }
+    }));
+    setTestingCloudConnectionId(null);
   }
 
   async function runPathValidation() {
@@ -439,6 +497,13 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method, roots }
     }
 
     const payload = getPayloadFromValues();
+
+    if (cloudCopiesEnabled && selectedCloudDestinations.length === 0) {
+      setMessageTone("error");
+      setMessage("Select at least one connected cloud account or turn off cloud copies.");
+      setFieldErrors({ cloudDestinations: "Select at least one connected cloud account." });
+      return;
+    }
 
     startTransition(async () => {
       const response = await fetch(submitEndpoint, {
@@ -640,6 +705,122 @@ export function SiteForm({ site, detectEndpoint, submitEndpoint, method, roots }
             <label className="block"><span className="mb-2 block text-sm font-medium text-slate-200">Cron Expression</span><input className="input font-mono text-sm" name="cronExpression" value={values.cronExpression} onChange={(e) => updateField("cronExpression", e.target.value)} placeholder="0 2 * * *" spellCheck={false} /></label>
           </div>
           <div className="mt-5 rounded-2xl border border-white/10 bg-white/5 p-4"><label className="flex items-start gap-3 text-sm text-slate-200"><input type="checkbox" name="scheduleEnabled" checked={scheduleEnabled} onChange={(e) => setScheduleEnabled(e.target.checked)} /><span>Enable Schedule<span className="mt-1 block text-xs text-slate-400">StackPress will only schedule this site when the site is active and the backup frequency is not Manual.</span></span></label></div>
+        </SectionCard>
+
+        <SectionCard title="Cloud Copies" description="Keep the local backup and optionally copy it to connected cloud accounts.">
+          <label className="flex items-start gap-3 text-sm text-slate-200">
+            <input
+              type="checkbox"
+              checked={cloudCopiesEnabled}
+              onChange={(event) => setCloudCopiesEnabled(event.target.checked)}
+            />
+            <span>
+              Enable cloud copies
+              <span className="mt-1 block text-xs text-slate-400">
+                Turning this off stops future cloud uploads. Existing local and remote backups are not deleted.
+              </span>
+            </span>
+          </label>
+
+          {cloudCopiesEnabled ? (
+            <div className="mt-5 space-y-3">
+              {cloudConnections.length === 0 ? (
+                <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-4 text-sm text-amber-100">
+                  No cloud accounts are connected. Connect an account in Settings before enabling cloud copies.
+                </div>
+              ) : cloudConnections.map((connection) => {
+                const destination = selectedDestination(connection.id);
+                const usable = connection.enabled && connection.status === "connected";
+                const selectable = usable || Boolean(destination);
+                const testResult = cloudTestMessages[connection.id];
+
+                return (
+                  <div key={connection.id} className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <label className={`flex min-w-0 items-start gap-3 text-sm ${selectable ? "text-slate-100" : "text-slate-500"}`}>
+                        <input
+                          type="checkbox"
+                          checked={Boolean(destination)}
+                          disabled={!selectable}
+                          onChange={(event) => toggleCloudConnection(connection.id, event.target.checked)}
+                        />
+                        <span className="min-w-0">
+                          <span className="block font-medium">{connection.displayName}</span>
+                          <span className="mt-1 block break-all text-xs text-slate-400">
+                            {connection.accountEmail ?? connection.provider.replace(/_/g, " ")}
+                          </span>
+                          <span className={`mt-2 inline-block text-xs font-medium ${usable ? "text-emerald-300" : "text-amber-300"}`}>
+                            {usable ? "Connected and available" : `${connection.status.replace(/_/g, " ")} — unavailable for new selection`}
+                          </span>
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={!usable || testingCloudConnectionId === connection.id}
+                        onClick={() => testCloudConnection(connection.id)}
+                      >
+                        {testingCloudConnectionId === connection.id ? "Testing…" : "Test connection"}
+                      </button>
+                    </div>
+
+                    {testResult ? (
+                      <p className={`mt-3 text-sm ${testResult.ok ? "text-emerald-200" : "text-rose-200"}`} role="status">
+                        {testResult.message}
+                      </p>
+                    ) : null}
+
+                    {destination ? (
+                      <div className="mt-5 border-t border-white/10 pt-4">
+                        <div className="grid gap-4 md:grid-cols-2">
+                          <label className="flex items-start gap-3 text-sm text-slate-200">
+                            <input
+                              type="checkbox"
+                              checked={destination.uploadScheduledBackups}
+                              onChange={(event) => updateCloudDestination(connection.id, { uploadScheduledBackups: event.target.checked })}
+                            />
+                            <span>Upload scheduled backups automatically</span>
+                          </label>
+                          <label className="flex items-start gap-3 text-sm text-slate-200">
+                            <input
+                              type="checkbox"
+                              checked={destination.uploadManualBackups}
+                              onChange={(event) => updateCloudDestination(connection.id, { uploadManualBackups: event.target.checked })}
+                            />
+                            <span>Upload manual backups automatically</span>
+                          </label>
+                        </div>
+                        {connection.provider === "google_drive" ? (
+                          <label className="mt-4 block">
+                            <span className="mb-2 block text-sm font-medium text-slate-200">Remote site folder</span>
+                            <input
+                              className="input"
+                              value={destination.remoteFolderName ?? ""}
+                              onChange={(event) => updateCloudDestination(connection.id, { remoteFolderName: event.target.value })}
+                              placeholder={values.name || "Site name"}
+                              maxLength={180}
+                            />
+                            <span className="mt-2 block text-xs text-slate-400">
+                              Stored beneath StackPress Backups / installation. Leave blank to use the site name.
+                            </span>
+                          </label>
+                        ) : null}
+                        <label className="mt-4 block">
+                          <span className="mb-2 block text-sm font-medium text-slate-200">Cloud retention</span>
+                          <select className="select" value={destination.retentionPolicy} onChange={(event) => updateCloudDestination(connection.id, { retentionPolicy: event.target.value as CloudDestinationValue["retentionPolicy"] })}>
+                            <option value="retain_remote">Retain remote copy after local deletion</option>
+                            <option value="delete_with_local">Delete local and remote copies together</option>
+                          </select>
+                          <span className="mt-2 block text-xs text-slate-400">Remote deletion only applies to verified StackPress-managed file IDs.</span>
+                        </label>
+                      </div>
+                    ) : null}
+                  </div>
+                );
+              })}
+              {fieldErrors.cloudDestinations ? <p className="text-sm text-rose-200">{fieldErrors.cloudDestinations}</p> : null}
+            </div>
+          ) : null}
         </SectionCard>
 
         <SectionCard title="Retention & Cleanup" description="Controls how many backup points StackPress keeps.">
@@ -990,7 +1171,13 @@ export function RestoreBackupButton({
   );
 }
 
-export function DeleteBackupButton({ endpoint }: { endpoint: string }) {
+export function getLocalBackupDeleteWarning(hasVerifiedRemoteCopy: boolean) {
+  return hasVerifiedRemoteCopy
+    ? "Delete the local backup files? The history record and verified remote copy will remain available."
+    : "Delete this local backup record and files? No verified remote copy exists, so this may remove the only usable recovery point.";
+}
+
+export function DeleteBackupButton({ endpoint, hasVerifiedRemoteCopy = false }: { endpoint: string; hasVerifiedRemoteCopy?: boolean }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
@@ -1000,7 +1187,8 @@ export function DeleteBackupButton({ endpoint }: { endpoint: string }) {
       type="button"
       disabled={pending}
       onClick={() => {
-        if (!window.confirm("Delete this backup record and any backup files on disk?")) {
+        const warning = getLocalBackupDeleteWarning(hasVerifiedRemoteCopy);
+        if (!window.confirm(warning)) {
           return;
         }
         startTransition(async () => {
@@ -1014,7 +1202,7 @@ export function DeleteBackupButton({ endpoint }: { endpoint: string }) {
         });
       }}
     >
-      {pending ? "Deleting..." : "Delete"}
+      {pending ? "Deleting..." : "Delete local copy"}
     </button>
   );
 }

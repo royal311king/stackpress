@@ -7,6 +7,6 @@ if [ ! -f /app/data/stackpress.db ] && [ -f /opt/stackpress-seed/stackpress.db ]
   cp /opt/stackpress-seed/stackpress.db /app/data/stackpress.db
 fi
 
-npx prisma db push --skip-generate
+npx prisma migrate deploy
 
 exec "$@"

@@ -9,6 +9,8 @@ import { runCommand } from "@/lib/shell";
 import { logActivity } from "@/lib/services/logging";
 import { getAppSettings } from "@/lib/services/settings";
 import { resolveSiteDirectory, resolveStackPressBackupDirectory } from "@/lib/services/paths";
+import { enqueueCloudUploadsForBackup } from "@/lib/services/cloud-storage/upload-jobs";
+import { cleanupRemoteCopiesForExpiredBackup } from "@/lib/services/cloud-storage/remote-retention";
 
 const BACKUP_SUCCESS_STATUS = "success" as const;
 const BACKUP_SUCCESS_WITH_WARNINGS_STATUS = "success_with_warnings" as const;
@@ -293,7 +295,6 @@ export async function runBackup(siteId: string, triggerSource = "manual"): Promi
       }
     });
 
-    await enforceRetention(site.id);
     await logBackupActivity(
       hasWarnings ? "warn" : "info",
       triggerSource,
@@ -308,6 +309,18 @@ export async function runBackup(siteId: string, triggerSource = "manual"): Promi
         status: finalStatus
       }
     );
+
+    // Persist cloud work only after local success. The background worker performs uploads.
+    try {
+      await enqueueCloudUploadsForBackup(job.id);
+    } catch (cloudError) {
+      await logActivity("cloud_backup", `Cloud upload tasks could not be queued for ${site.name}`, "error", {
+        backupId: job.id,
+        siteId: site.id,
+        error: cloudError instanceof Error ? cloudError.message : "Unknown cloud replication failure"
+      }).catch(() => {});
+    }
+    await enforceRetention(site.id);
 
     return {
       backupId: job.id,
@@ -335,14 +348,21 @@ export async function enforceRetention(siteId: string) {
   const now = Date.now();
 
   for (const [index, backup] of backups.entries()) {
-    const tooMany = index >= site.retentionCount;
-    const tooOld =
-      typeof site.retentionDays === "number" &&
-      backup.completedAt &&
-      now - backup.completedAt.getTime() > site.retentionDays * 86400000;
+    const { expired } = shouldExpireBackup({
+      index,
+      retentionCount: site.retentionCount,
+      retentionDays: site.retentionDays,
+      completedAt: backup.completedAt,
+      now
+    });
     const protectNewest = site.neverDeleteNewest && backup.id === newestId;
 
-    if ((tooMany || tooOld) && !protectNewest) {
+    const activeCloudUpload = await prisma.cloudUploadJob.findFirst({
+      where: { backupId: backup.id, status: { in: ["queued", "running"] } },
+      select: { id: true }
+    });
+
+    if (expired && !isRetentionProtected(backup.isPinned, protectNewest) && !activeCloudUpload && await cleanupRemoteCopiesForExpiredBackup(backup.id)) {
       if (backup.dbDumpPath && fs.existsSync(backup.dbDumpPath)) {
         fs.unlinkSync(backup.dbDumpPath);
       }
@@ -355,4 +375,21 @@ export async function enforceRetention(siteId: string) {
       await prisma.backupJob.delete({ where: { id: backup.id } });
     }
   }
+}
+
+export function shouldExpireBackup(input: {
+  index: number;
+  retentionCount: number;
+  retentionDays: number | null;
+  completedAt: Date | null;
+  now: number;
+}) {
+  const tooMany = input.index >= input.retentionCount;
+  const tooOld = typeof input.retentionDays === "number" && input.completedAt !== null &&
+    input.now - input.completedAt.getTime() > input.retentionDays * 86400000;
+  return { expired: tooMany || tooOld, tooMany, tooOld };
+}
+
+export function isRetentionProtected(isPinned: boolean, protectNewest: boolean) {
+  return isPinned || protectNewest;
 }

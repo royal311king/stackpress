@@ -17,10 +17,10 @@ FROM base AS builder
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN mkdir -p data logs storage
+RUN mkdir -p data logs storage && touch data/stackpress.db
 ENV DATABASE_URL=file:../data/stackpress.db
 RUN npx prisma generate
-RUN npx prisma db push --skip-generate
+RUN npx prisma migrate deploy
 RUN npm run build
 
 FROM base AS runner

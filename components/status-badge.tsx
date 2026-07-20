@@ -23,13 +23,13 @@ function formatStatusLabel(value?: string | null) {
 export function StatusBadge({ value }: { value?: string | null }) {
   const normalized = (value ?? "unknown").toLowerCase();
   const style =
-    normalized === "success" || normalized === "completed" || normalized === "active" || normalized === "enabled" || normalized === "online"
+    normalized === "success" || normalized === "completed" || normalized === "verified" || normalized === "active" || normalized === "enabled" || normalized === "online"
       ? "badge badge-ok"
-      : normalized === "success_with_warnings" || normalized === "warn"
+      : normalized === "success_with_warnings" || normalized === "unverified" || normalized === "warn"
         ? "badge badge-caution"
-        : normalized === "failed" || normalized === "error" || normalized === "inactive" || normalized === "invalid" || normalized === "down"
+        : normalized === "failed" || normalized === "needs_auth" || normalized === "needs_reauthorization" || normalized === "error" || normalized === "inactive" || normalized === "invalid" || normalized === "down"
           ? "badge badge-danger"
-          : normalized === "running" || normalized === "info"
+          : normalized === "running" || normalized === "testing" || normalized === "info"
             ? "badge badge-info"
             : normalized === "queued" || normalized === "disabled" || normalized === "manual" || normalized === "unknown"
               ? "badge badge-muted"

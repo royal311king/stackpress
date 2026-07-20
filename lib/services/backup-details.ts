@@ -38,6 +38,19 @@ export async function getBackupDetail(backupId: string) {
   }
 
   const manifest = readManifest(backup.manifestPath);
+  const cloudUploads = await prisma.cloudUploadJob.findMany({
+    where: { backupId },
+    orderBy: { createdAt: "asc" }
+  });
+  const [cloudFiles, cloudDestinations, remoteRestoreJobs] = await Promise.all([
+    prisma.cloudBackupFile.findMany({ where: { backupId }, orderBy: { createdAt: "asc" } }),
+    prisma.siteCloudDestination.findMany({
+      where: { siteId: backup.siteId },
+      include: { cloudConnection: true },
+      orderBy: { createdAt: "asc" }
+    }),
+    prisma.remoteRestoreJob.findMany({ where: { backupId }, orderBy: { createdAt: "asc" } })
+  ]);
   const allLogs = await prisma.activityLog.findMany({
     orderBy: { createdAt: "desc" },
     take: 300
@@ -75,6 +88,10 @@ export async function getBackupDetail(backupId: string) {
 
   return {
     backup,
+    cloudUploads,
+    cloudFiles,
+    cloudDestinations,
+    remoteRestoreJobs,
     manifest,
     relevantLogs,
     retention: {
