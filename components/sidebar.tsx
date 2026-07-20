@@ -2,17 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Activity, Database, FolderKanban, LayoutDashboard, Logs, Settings2 } from "lucide-react";
+import { Activity, CloudUpload, Database, FolderKanban, LayoutDashboard, Logs, Settings2 } from "lucide-react";
 
+import { isSidebarItemActive, sidebarNavigationItems } from "@/lib/navigation";
 import { cn } from "@/lib/utils";
 
-const items = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/sites", label: "Sites", icon: FolderKanban },
-  { href: "/backups", label: "Backups", icon: Database },
-  { href: "/settings", label: "Settings", icon: Settings2 },
-  { href: "/logs", label: "Logs", icon: Logs }
-];
+const icons = {
+  dashboard: LayoutDashboard,
+  sites: FolderKanban,
+  backups: Database,
+  settings: Settings2,
+  "cloud-backups": CloudUpload,
+  logs: Logs
+};
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -28,9 +30,9 @@ export function Sidebar() {
       </div>
 
       <nav className="space-y-2">
-        {items.map((item) => {
-          const Icon = item.icon;
-          const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+        {sidebarNavigationItems.map((item) => {
+          const Icon = icons[item.icon];
+          const active = isSidebarItemActive(pathname, item);
 
           return (
             <Link

@@ -4,17 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { cn } from "@/lib/utils";
-
-const items = [
-  { href: "/settings", label: "General" },
-  { href: "/settings/backups/cloud-providers", label: "Backups · Cloud Providers" }
-];
+import { settingsNavigationItems } from "@/lib/navigation";
 
 export function SettingsNav() {
   const pathname = usePathname();
   return (
     <nav className="mb-6 flex flex-wrap gap-2 border-b border-white/10 pb-4" aria-label="Settings sections">
-      {items.map((item) => {
+      {settingsNavigationItems.map((item) => {
         const active = pathname === item.href;
         return (
           <Link
