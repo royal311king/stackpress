@@ -9,6 +9,14 @@ export const runtimeConfig = {
   timezone: process.env.STACKPRESS_TIMEZONE ?? "America/Chicago"
 };
 
+export function canonicalAppOrigin(appUrl = process.env.STACKPRESS_APP_URL ?? "http://localhost:3000") {
+  const url = new URL(appUrl);
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("STACKPRESS_APP_URL must use http or https");
+  }
+  return url.origin;
+}
+
 export function ensureRuntimeDirectories() {
   for (const dir of [
     runtimeConfig.dataRoot,

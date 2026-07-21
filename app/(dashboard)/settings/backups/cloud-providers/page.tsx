@@ -7,7 +7,7 @@ import { cloudConnectionService } from "@/lib/services/cloud-storage/connections
 export default async function CloudProvidersPage({
   searchParams
 }: {
-  searchParams: Promise<{ cloud?: string; reason?: string }>;
+  searchParams: Promise<{ google?: string; cloud?: string; reason?: string }>;
 }) {
   const [connections, usage, query] = await Promise.all([
     cloudConnectionService.list(),
@@ -19,11 +19,12 @@ export default async function CloudProvidersPage({
     searchParams
   ]);
   const usageByConnection = new Map(usage.map((item) => [item.cloudConnectionId, item._count.siteId]));
-  const cloudMessage = query.cloud === "google_connected"
+  const callbackStatus = query.google ?? query.cloud;
+  const cloudMessage = callbackStatus === "connected" || callbackStatus === "google_connected"
     ? { tone: "success", text: "Google Drive connected successfully." }
-    : query.cloud === "google_denied"
+    : callbackStatus === "cancelled" || callbackStatus === "google_denied"
       ? { tone: "warning", text: "Google Drive authorization was cancelled. No credentials were changed." }
-      : query.cloud === "google_error"
+      : callbackStatus === "error" || callbackStatus === "google_error"
         ? { tone: "error", text: `Google Drive could not be connected${query.reason ? ` (${query.reason.replaceAll("_", " ")})` : ""}.` }
         : null;
 
