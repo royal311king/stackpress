@@ -7,6 +7,11 @@ import {
   cloudUploadDedupeKey,
   isStaleCloudUpload
 } from "./upload-jobs";
+import {
+  artifactLifecycleMessage,
+  assertRequiredBackupArtifactPaths,
+  requiredBackupArtifactKinds
+} from "./types";
 
 describe("cloud upload workflow decisions", () => {
   test("cloud failure after local success remains a cloud-only failed state", () => {
@@ -43,5 +48,24 @@ describe("cloud upload workflow decisions", () => {
     assert.equal(isStaleCloudUpload(null, now), true);
     assert.equal(isStaleCloudUpload(new Date("2026-07-15T12:00:00.000Z"), now), true);
     assert.equal(isStaleCloudUpload(new Date("2026-07-15T12:09:00.000Z"), now), false);
+  });
+
+  test("full backups require and report both database and files artifacts", () => {
+    const fullBackup = {
+      backupType: "full",
+      dbDumpPath: "/backups/db.sql",
+      filesArchivePath: "/backups/files.tar.gz",
+      manifestPath: "/backups/manifest.json"
+    };
+    assert.doesNotThrow(() => assertRequiredBackupArtifactPaths(fullBackup));
+    assert.deepEqual(requiredBackupArtifactKinds("full"), ["database", "files"]);
+    assert.equal(
+      artifactLifecycleMessage("Queued upload artifacts", requiredBackupArtifactKinds("full")),
+      "Queued upload artifacts: database, files"
+    );
+    assert.throws(
+      () => assertRequiredBackupArtifactPaths({ ...fullBackup, filesArchivePath: null }),
+      /missing required files artifact/
+    );
   });
 });

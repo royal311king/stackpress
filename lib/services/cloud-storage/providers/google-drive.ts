@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import type { CloudStorageProvider } from "../provider";
 import {
+  assertRequiredBackupArtifactPaths,
   assertCloudUploadEligibleBackup,
   CloudProviderError,
   type CloudBackupSource,
@@ -38,6 +39,13 @@ type GoogleDriveProviderOptions = {
   sleep?: (milliseconds: number) => Promise<void>;
   random?: () => number;
   maxAttempts?: number;
+  onArtifactUploaded?: (event: {
+    backupId: string;
+    siteId: string;
+    cloudConnectionId: string;
+    artifactKind: RemoteFileKind;
+    remoteFileId: string;
+  }) => void | Promise<void>;
 };
 
 type LocalArtifact = {
@@ -152,7 +160,8 @@ async function checksums(localPath: string) {
   return { md5: md5.digest("hex"), sha256: sha256.digest("hex") };
 }
 
-async function localArtifacts(source: CloudBackupSource): Promise<LocalArtifact[]> {
+export async function localArtifacts(source: CloudBackupSource): Promise<LocalArtifact[]> {
+  assertRequiredBackupArtifactPaths(source.backup);
   const values: Array<{ kind: RemoteFileKind; localPath: string | null }> = [
     { kind: "database", localPath: source.backup.dbDumpPath },
     { kind: "files", localPath: source.backup.filesArchivePath },
@@ -225,6 +234,7 @@ export class GoogleDriveProvider implements CloudStorageProvider {
   private readonly sleep: (milliseconds: number) => Promise<void>;
   private readonly random: () => number;
   private readonly maxAttempts: number;
+  private readonly onArtifactUploaded?: GoogleDriveProviderOptions["onArtifactUploaded"];
 
   constructor(
     private readonly context: CloudProviderContext,
@@ -239,6 +249,7 @@ export class GoogleDriveProvider implements CloudStorageProvider {
     this.sleep = options.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
     this.random = options.random ?? Math.random;
     this.maxAttempts = options.maxAttempts ?? 4;
+    this.onArtifactUploaded = options.onArtifactUploaded;
   }
 
   private client() {
@@ -407,6 +418,15 @@ export class GoogleDriveProvider implements CloudStorageProvider {
         });
         completedBytes += artifact.size;
         remoteFiles.push(remoteMetadata(artifact.kind, verified));
+        await Promise.resolve(this.onArtifactUploaded?.({
+          backupId: source.backup.id,
+          siteId: source.site.id,
+          cloudConnectionId: this.context.connection.id,
+          artifactKind: artifact.kind,
+          remoteFileId: verified.id
+        })).catch(() => {
+          // Observability must never turn a verified cloud copy into a failed upload.
+        });
       } catch (error) {
         const normalized = providerError("upload", error);
         await this.metadata.update(record.id, {

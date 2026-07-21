@@ -5,7 +5,14 @@ import { logActivity } from "@/lib/services/logging";
 import { cloudConnectionService } from "./connections";
 import { registerBuiltInCloudStorageProviders } from "./providers";
 import { createCloudStorageProvider } from "./registry";
-import { assertCloudUploadEligibleBackup, CloudProviderError, type CloudProviderType } from "./types";
+import {
+  artifactLifecycleMessage,
+  assertCloudUploadEligibleBackup,
+  assertRequiredBackupArtifactPaths,
+  CloudProviderError,
+  requiredBackupArtifactKinds,
+  type CloudProviderType
+} from "./types";
 import { destinationAppliesToTrigger } from "./site-destinations";
 
 export const ACTIVE_CLOUD_UPLOAD_STATUSES = ["queued", "running"] as const;
@@ -30,6 +37,7 @@ export async function enqueueCloudUploadsForBackup(backupId: string) {
   const backup = await prisma.backupJob.findUnique({ where: { id: backupId } });
   if (!backup) throw new Error("Backup not found");
   assertCloudUploadEligibleBackup(backup, "google_drive");
+  assertRequiredBackupArtifactPaths(backup);
 
   const [destinations, connections] = await Promise.all([
     prisma.siteCloudDestination.findMany({ where: { siteId: backup.siteId } }),
@@ -42,7 +50,7 @@ export async function enqueueCloudUploadsForBackup(backupId: string) {
       destinationAppliesToTrigger(destination, backup.triggerSource));
   });
 
-  return Promise.all(selected.map((destination) => {
+  const jobs = await Promise.all(selected.map((destination) => {
     const connection = connectionsById.get(destination.cloudConnectionId)!;
     return prisma.cloudUploadJob.upsert({
     where: {
@@ -61,6 +69,22 @@ export async function enqueueCloudUploadsForBackup(backupId: string) {
     update: {}
   });
   }));
+  if (jobs.length > 0) {
+    const artifactKinds = requiredBackupArtifactKinds(backup.backupType);
+    await logActivity(
+      "cloud_backup",
+      artifactLifecycleMessage("Queued upload artifacts", artifactKinds),
+      "info",
+      {
+        backupId,
+        siteId: backup.siteId,
+        artifactKinds,
+        cloudUploadJobIds: jobs.map((job) => job.id),
+        cloudConnectionIds: jobs.map((job) => job.cloudConnectionId)
+      }
+    );
+  }
+  return jobs;
 }
 
 export async function enqueueCloudUpload(backupId: string, cloudConnectionId: string) {
@@ -70,6 +94,7 @@ export async function enqueueCloudUpload(backupId: string, cloudConnectionId: st
   ]);
   if (!backup) throw new Error("Backup not found");
   assertCloudUploadEligibleBackup(backup, connection.provider);
+  assertRequiredBackupArtifactPaths(backup);
   if (!connection.enabled || connection.status !== "connected") {
     throw new Error("Cloud destination must be enabled and connected");
   }
@@ -198,12 +223,15 @@ export async function processCloudUploadJob(job: CloudUploadJob) {
         lastError: null
       }
     });
-    await logActivity("cloud_backup", `Cloud upload completed for ${backup.site.name}`, "info", {
+    const uploadedArtifactKinds = result.files.map((file) => file.kind);
+    await logActivity("cloud_backup", artifactLifecycleMessage("Uploaded artifacts", uploadedArtifactKinds), "info", {
       backupId: backup.id,
       siteId: backup.siteId,
+      siteName: backup.site.name,
       cloudUploadJobId: claimed.id,
       cloudConnectionId: claimed.cloudConnectionId,
-      remoteFileIds: result.files.map((file) => file.remoteId)
+      remoteFileIds: result.files.map((file) => file.remoteId),
+      artifactKinds: uploadedArtifactKinds
     });
   } catch (error) {
     const retryable = error instanceof CloudProviderError && error.retryable;

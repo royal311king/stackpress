@@ -233,11 +233,15 @@ describe("GoogleDriveProvider integration with mocked Drive API", () => {
   test("creates the default hierarchy once, streams artifacts, verifies them, and persists IDs", async () => {
     const client = new MockGoogleDriveClient();
     const metadata = new MemoryMetadataRepository();
+    const uploadedArtifactKinds: RemoteFileKind[] = [];
     const provider = new GoogleDriveProvider(context, {
       clientFactory: async () => client,
       metadataRepository: metadata,
       installationName: "Test Machine",
-      sleep: async () => {}
+      sleep: async () => {},
+      onArtifactUploaded: (artifact) => {
+        uploadedArtifactKinds.push(artifact.artifactKind);
+      }
     });
     const progress: number[] = [];
     const first = await provider.uploadBackup(await backupSource("backup-1"), (event) => {
@@ -247,6 +251,8 @@ describe("GoogleDriveProvider integration with mocked Drive API", () => {
 
     assert.equal(client.createdFolderCount, 3);
     assert.equal(first.files.length, 3);
+    assert.deepEqual(first.files.map((file) => file.kind), ["database", "files", "manifest"]);
+    assert.deepEqual(uploadedArtifactKinds.slice(0, 3), ["database", "files", "manifest"]);
     assert.equal(second.files.length, 3);
     assert.equal(progress.some((value) => value > 0), true);
     assert.equal(progress.at(-1), 100);
@@ -257,6 +263,24 @@ describe("GoogleDriveProvider integration with mocked Drive API", () => {
     assert.equal(records.every((record) => record.remoteSize === record.localSize), true);
     assert.equal(records.every((record) => record.localChecksum === record.remoteChecksum), true);
     assert.equal(records.every((record) => Boolean(record.verifiedAt)), true);
+  });
+
+  test("never treats a full backup without its files archive as uploadable", async () => {
+    const client = new MockGoogleDriveClient();
+    const source = await backupSource("backup-missing-files");
+    source.backup.filesArchivePath = null;
+    const provider = new GoogleDriveProvider(context, {
+      clientFactory: async () => client,
+      metadataRepository: new MemoryMetadataRepository(),
+      installationName: "Test Machine",
+      sleep: async () => {}
+    });
+
+    await assert.rejects(
+      provider.uploadBackup(source),
+      /full backup is missing required files artifact/
+    );
+    assert.equal(client.uploadAttempts, 0);
   });
 
   test("retries transient API failures and does not retry permanent authentication errors", async () => {

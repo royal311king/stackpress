@@ -11,6 +11,11 @@ import { getAppSettings } from "@/lib/services/settings";
 import { resolveSiteDirectory, resolveStackPressBackupDirectory } from "@/lib/services/paths";
 import { enqueueCloudUploadsForBackup } from "@/lib/services/cloud-storage/upload-jobs";
 import { cleanupRemoteCopiesForExpiredBackup } from "@/lib/services/cloud-storage/remote-retention";
+import {
+  artifactLifecycleMessage,
+  assertRequiredBackupArtifactPaths,
+  localBackupArtifactPaths
+} from "@/lib/services/cloud-storage/types";
 
 const BACKUP_SUCCESS_STATUS = "success" as const;
 const BACKUP_SUCCESS_WITH_WARNINGS_STATUS = "success_with_warnings" as const;
@@ -247,6 +252,28 @@ export async function runBackup(siteId: string, triggerSource = "manual"): Promi
         throw new Error("Expected html directory does not exist");
       }
     }
+
+    const generatedArtifactPaths = {
+      backupType: site.backupMode,
+      dbDumpPath: fs.existsSync(dbDumpPath) ? dbDumpPath : null,
+      filesArchivePath: fs.existsSync(filesArchivePath) ? filesArchivePath : null,
+      manifestPath: null
+    };
+    assertRequiredBackupArtifactPaths(generatedArtifactPaths);
+    const createdArtifactKinds = localBackupArtifactPaths(generatedArtifactPaths)
+      .filter((artifact) => artifact.localPath)
+      .map((artifact) => artifact.kind);
+    await logActivity(
+      "backup",
+      artifactLifecycleMessage("Created backup artifacts", createdArtifactKinds),
+      "info",
+      {
+        backupId: job.id,
+        siteId: site.id,
+        backupType: site.backupMode,
+        artifacts: localBackupArtifactPaths(generatedArtifactPaths).filter((artifact) => artifact.localPath)
+      }
+    );
 
     await updateJob(job.id, { progressStep: "writing-manifest" });
 

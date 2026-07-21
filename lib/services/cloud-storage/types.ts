@@ -100,6 +100,32 @@ export function requiredBackupArtifactKinds(backupType: string): RemoteFileKind[
       : ["database", "files"];
 }
 
+export function localBackupArtifactPaths(backup: Pick<BackupJob, "dbDumpPath" | "filesArchivePath" | "manifestPath">) {
+  return [
+    { kind: "database" as const, localPath: backup.dbDumpPath },
+    { kind: "files" as const, localPath: backup.filesArchivePath },
+    { kind: "manifest" as const, localPath: backup.manifestPath }
+  ];
+}
+
+export function assertRequiredBackupArtifactPaths(
+  backup: Pick<BackupJob, "backupType" | "dbDumpPath" | "filesArchivePath" | "manifestPath">
+) {
+  const paths = new Map(localBackupArtifactPaths(backup).map((artifact) => [artifact.kind, artifact.localPath]));
+  for (const kind of requiredBackupArtifactKinds(backup.backupType)) {
+    if (!paths.get(kind)) {
+      throw new Error(`Completed ${backup.backupType} backup is missing required ${kind} artifact`);
+    }
+  }
+}
+
+export function artifactLifecycleMessage(
+  stage: "Created backup artifacts" | "Queued upload artifacts" | "Uploaded artifacts",
+  kinds: readonly RemoteFileKind[]
+) {
+  return `${stage}: ${kinds.join(", ")}`;
+}
+
 export type RemoteFileMetadata = {
   kind: RemoteFileKind;
   remoteId: string;
